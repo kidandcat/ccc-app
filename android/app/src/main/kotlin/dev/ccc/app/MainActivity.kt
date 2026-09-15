@@ -1,4 +1,4 @@
-package es.ccc.ccc_app
+package dev.ccc.app
 
 import io.flutter.embedding.android.FlutterActivity
 
