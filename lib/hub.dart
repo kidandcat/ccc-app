@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pinenacl/x25519.dart' as nacl;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class HubIdentity {
@@ -110,15 +112,50 @@ class TurnInfo {
       );
 }
 
+class Store {
+  static const _k = 'ccc.machines';
+  static Future<List<Machine>> load() async {
+    final p = await SharedPreferences.getInstance();
+    final raw = p.getStringList(_k) ?? [];
+    return raw.map((e) => Machine.fromJson(jsonDecode(e) as Map<String, dynamic>)).toList();
+  }
+
+  static Future<void> save(List<Machine> ms) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setStringList(_k, ms.map((e) => jsonEncode(e.toJson())).toList());
+  }
+}
+
+List<BotInfo> botsFrom(Map<String, dynamic> res) {
+  final body = res['body'];
+  final raw = body is String ? jsonDecode(body) : body;
+  final list = <BotInfo>[];
+  if (raw is List) {
+    for (final e in raw) {
+      list.add(BotInfo.fromJson(e as Map<String, dynamic>));
+    }
+  }
+  return list;
+}
+
 class HubSession {
   HubSession(this.identity, this.machine);
   final HubIdentity identity;
   final Machine machine;
   WebSocketChannel? _ch;
   StreamSubscription? _sub;
+  Timer? _ping;
+  Timer? _retry;
+  bool _want = false;
+  int _backoff = 1;
+  int _gen = 0;
+  Future<void>? _opening;
   int _rpc = 0;
   final _pending = <String, Completer<Map<String, dynamic>>>{};
-  void Function(String kind, Map<String, dynamic> body)? onEvent;
+  final _listeners = <void Function(String kind, Map<String, dynamic> body)>[];
+
+  void addListener(void Function(String kind, Map<String, dynamic> body) f) => _listeners.add(f);
+  void removeListener(void Function(String kind, Map<String, dynamic> body) f) => _listeners.remove(f);
 
   static Future<HubIdentity> loadIdentity() async {
     const store = FlutterSecureStorage();
@@ -135,10 +172,74 @@ class HubSession {
   }
 
   Future<void> connect() async {
-    await close();
-    _ch = WebSocketChannel.connect(_ws(machine.hub));
-    _ch!.sink.add(jsonEncode({'v': 1, 't': 'open', 'role': 'device', 'pk': identity.id}));
-    _sub = _ch!.stream.listen(_onFrame, onError: (_) {}, cancelOnError: true);
+    _want = true;
+    if (_ch != null) return;
+    _backoff = 1;
+    _opening ??= _open().whenComplete(() => _opening = null);
+    await _opening;
+  }
+
+  Future<void> _open() async {
+    await _tear();
+    if (!_want) return;
+    final gen = _gen;
+    try {
+      _ch = IOWebSocketChannel.connect(_ws(machine.hub), pingInterval: const Duration(seconds: 20));
+      _ch!.sink.add(jsonEncode({'v': 1, 't': 'open', 'role': 'device', 'pk': identity.id}));
+      _sub = _ch!.stream.listen(
+        _onFrame,
+        onError: (_) {
+          if (gen == _gen) _dropped();
+        },
+        onDone: () {
+          if (gen == _gen) _dropped();
+        },
+        cancelOnError: true,
+      );
+      _ping = Timer.periodic(const Duration(seconds: 30), (_) {
+        try {
+          _ch?.sink.add(jsonEncode({'v': 1, 't': 'ping'}));
+        } catch (_) {}
+      });
+      _backoff = 1;
+    } catch (_) {
+      if (gen == _gen) _dropped();
+    }
+  }
+
+  void _dropped() {
+    if (!_want) return;
+    _failPending('disconnected');
+    _ping?.cancel();
+    _ping = null;
+    if (_retry?.isActive ?? false) return;
+    final wait = Duration(seconds: _backoff);
+    _backoff = min(30, _backoff * 2);
+    _retry = Timer(wait, () {
+      if (_want) _open();
+    });
+  }
+
+  void _failPending(Object e) {
+    final pending = Map<String, Completer<Map<String, dynamic>>>.from(_pending);
+    _pending.clear();
+    for (final c in pending.values) {
+      if (!c.isCompleted) c.completeError(e);
+    }
+  }
+
+  Future<void> _tear() async {
+    _gen++;
+    _ping?.cancel();
+    _ping = null;
+    _retry?.cancel();
+    _retry = null;
+    await _sub?.cancel();
+    _sub = null;
+    try {
+      await _ch?.sink.close();
+    } catch (_) {}
+    _ch = null;
   }
 
   Uri _ws(String hub) {
@@ -176,7 +277,10 @@ class HubSession {
           body = jsonDecode(rawBody) as Map<String, dynamic>;
         } catch (_) {}
       }
-      onEvent?.call(rpc['method'] as String? ?? 'event', body);
+      final method = rpc['method'] as String? ?? 'event';
+      for (final f in List.of(_listeners)) {
+        f(method, body);
+      }
       return;
     }
     if (kind == 'pair') {
@@ -247,10 +351,9 @@ class HubSession {
   }
 
   Future<void> close() async {
-    await _sub?.cancel();
-    _sub = null;
-    await _ch?.sink.close();
-    _ch = null;
+    _want = false;
+    _failPending('closed');
+    await _tear();
   }
 }
 

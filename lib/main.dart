@@ -4,9 +4,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import 'crew.dart';
 import 'hub.dart';
+import 'notify.dart';
 
 const _ink = Color(0xFF0E1116);
 const _panel = Color(0xFF171C24);
@@ -17,15 +18,36 @@ const _gold = Color(0xFFD4A84B);
 
 const _maxImageBytes = 350 * 1024;
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const CccApp());
+  final identity = await HubSession.loadIdentity();
+  final crew = Crew(identity);
+  crew.openChat = (machine, session, bot) {
+    crew.navKey.currentState?.push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChatPage(session: session, bot: bot, machine: machine),
+      ),
+    );
+  };
+  await Notify.init(
+    onTap: (payload) {
+      void go() => crew.onNotificationTap(payload);
+      if (crew.navKey.currentState == null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => go());
+      } else {
+        go();
+      }
+    },
+  );
+  await crew.load();
+  runApp(CrewScope(crew: crew, child: const CccApp()));
 }
 
 class CccApp extends StatelessWidget {
   const CccApp({super.key});
   @override
   Widget build(BuildContext context) {
+    final crew = CrewScope.of(context);
     final base = ThemeData(
       brightness: Brightness.dark,
       scaffoldBackgroundColor: _ink,
@@ -38,6 +60,7 @@ class CccApp extends StatelessWidget {
     );
     return MaterialApp(
       title: 'CCC',
+      navigatorKey: crew.navKey,
       debugShowCheckedModeBanner: false,
       theme: base.copyWith(
         textTheme: GoogleFonts.sourceSans3TextTheme(base.textTheme).apply(
@@ -49,32 +72,6 @@ class CccApp extends StatelessWidget {
       home: const MachinesPage(),
     );
   }
-}
-
-class Store {
-  static const _k = 'ccc.machines';
-  static Future<List<Machine>> load() async {
-    final p = await SharedPreferences.getInstance();
-    final raw = p.getStringList(_k) ?? [];
-    return raw.map((e) => Machine.fromJson(jsonDecode(e) as Map<String, dynamic>)).toList();
-  }
-
-  static Future<void> save(List<Machine> ms) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setStringList(_k, ms.map((e) => jsonEncode(e.toJson())).toList());
-  }
-}
-
-List<BotInfo> _botsFrom(Map<String, dynamic> res) {
-  final body = res['body'];
-  final raw = body is String ? jsonDecode(body) : body;
-  final list = <BotInfo>[];
-  if (raw is List) {
-    for (final e in raw) {
-      list.add(BotInfo.fromJson(e as Map<String, dynamic>));
-    }
-  }
-  return list;
 }
 
 Future<String?> _askName(BuildContext context, {required String title, String initial = ''}) {
@@ -109,14 +106,6 @@ class MachinesPage extends StatefulWidget {
 }
 
 class _MachinesPageState extends State<MachinesPage> {
-  List<Machine> _ms = [];
-
-  @override
-  void initState() {
-    super.initState();
-    Store.load().then((v) => setState(() => _ms = v));
-  }
-
   Future<void> _add() async {
     final uri = await showDialog<String>(
       context: context,
@@ -163,9 +152,8 @@ class _MachinesPageState extends State<MachinesPage> {
         } catch (_) {}
       }
       m.name = name;
-      _ms = [..._ms.where((e) => e.id != m.id), m];
-      await Store.save(_ms);
-      setState(() {});
+      if (!mounted) return;
+      await CrewScope.of(context).pair(m);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pair failed: $e')));
@@ -175,6 +163,8 @@ class _MachinesPageState extends State<MachinesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final crew = CrewScope.of(context);
+    final ms = crew.machines;
     return Scaffold(
       appBar: AppBar(
         title: Text('CCC', style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700, letterSpacing: 0.08)),
@@ -186,7 +176,7 @@ class _MachinesPageState extends State<MachinesPage> {
         label: const Text('Pair machine'),
         icon: const Icon(Icons.qr_code_2),
       ),
-      body: _ms.isEmpty
+      body: ms.isEmpty
           ? const Center(
               child: Padding(
                 padding: EdgeInsets.all(32),
@@ -199,10 +189,10 @@ class _MachinesPageState extends State<MachinesPage> {
             )
           : ListView.separated(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-              itemCount: _ms.length,
+              itemCount: ms.length,
               separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (ctx, i) {
-                final m = _ms[i];
+                final m = ms[i];
                 return ListTile(
                   tileColor: _panel,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: _line)),
@@ -210,11 +200,7 @@ class _MachinesPageState extends State<MachinesPage> {
                   subtitle: Text(m.id.substring(0, 12), style: const TextStyle(color: _muted, fontFamily: 'monospace')),
                   trailing: const Icon(Icons.chevron_right, color: _muted),
                   onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BotsPage(machine: m))),
-                  onLongPress: () async {
-                    _ms.removeAt(i);
-                    await Store.save(_ms);
-                    setState(() {});
-                  },
+                  onLongPress: () => crew.removeAt(i),
                 );
               },
             ),
@@ -235,25 +221,22 @@ class _BotsPageState extends State<BotsPage> {
   HubSession? _s;
   List<BotInfo> _bots = [];
   String? _err;
+  bool _booted = false;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_booted) return;
+    _booted = true;
     _boot();
   }
 
   Future<void> _boot() async {
     try {
-      if (widget.session != null) {
-        _s = widget.session;
-        await _load();
-        return;
-      }
-      final id = await HubSession.loadIdentity();
-      final s = HubSession(id, widget.machine);
-      await s.connect();
+      _s = widget.session ?? CrewScope.read(context).sessionFor(widget.machine);
+      await _s!.connect();
       if (!mounted) return;
-      setState(() => _s = s);
+      setState(() {});
       await _load();
     } catch (e) {
       if (mounted) setState(() => _err = '$e');
@@ -266,7 +249,7 @@ class _BotsPageState extends State<BotsPage> {
       final res = await _s!.rpc(widget.archived ? 'archived' : 'bots');
       if (!mounted) return;
       setState(() {
-        _bots = _botsFrom(res);
+        _bots = botsFrom(res);
         _err = null;
       });
     } catch (e) {
@@ -274,28 +257,8 @@ class _BotsPageState extends State<BotsPage> {
     }
   }
 
-  @override
-  void dispose() {
-    if (widget.session == null) _s?.close();
-    super.dispose();
-  }
-
   Future<void> _archive(BotInfo b) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: _panel,
-        title: const Text('Archive session?'),
-        content: Text(
-          '“${b.name}” leaves the main list and its Telegram topic is closed. Restore it later from Archived.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Archive')),
-        ],
-      ),
-    );
-    if (ok != true || _s == null) return;
+    if (_s == null) return;
     try {
       await _s!.rpc('archive', {'bot_id': b.id});
       await _load();
@@ -450,24 +413,35 @@ class _ChatPageState extends State<ChatPage> {
   String _progress = '';
   Uint8List? _pendingImage;
   bool _sending = false;
+  Crew? _crew;
+  bool _listening = false;
 
   @override
-  void initState() {
-    super.initState();
-    widget.session.onEvent = (kind, body) {
-      if ((body['bot_id'] as num?)?.toInt() != widget.bot.id) return;
-      if (kind == 'progress') {
-        setState(() => _progress = body['text'] as String? ?? '');
-        _toBottom();
-      } else {
-        _load();
-      }
-    };
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_listening) return;
+    _listening = true;
+    _crew = CrewScope.of(context);
+    _crew!.watchChat(widget.machine, widget.bot.id);
+    widget.session.addListener(_onHub);
     _load();
+  }
+
+  void _onHub(String kind, Map<String, dynamic> body) {
+    if (!mounted) return;
+    if ((body['bot_id'] as num?)?.toInt() != widget.bot.id) return;
+    if (kind == 'progress') {
+      setState(() => _progress = body['text'] as String? ?? '');
+      _toBottom();
+    } else {
+      _load();
+    }
   }
 
   @override
   void dispose() {
+    widget.session.removeListener(_onHub);
+    _crew?.unwatchChat(widget.machine, widget.bot.id);
     _c.dispose();
     _focus.dispose();
     _scroll.dispose();

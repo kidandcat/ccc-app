@@ -14,3 +14,4 @@ Pairing is TOFU. `ccc pair` prints a URI whose query carries the instance public
 - Rename a session (tap the title)
 - Archive a session (swipe) so it leaves the main list; restore from Archived
 - Chat with one session (history + send + photos + live progress)
+- Push notification on the phone when a session posts a new message (Android keeps the hub socket alive in a foreground service)

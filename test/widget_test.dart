@@ -1,4 +1,5 @@
 import 'package:ccc_app/hub.dart';
+import 'package:ccc_app/notify.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -24,5 +25,41 @@ void main() {
     expect(b.archived, isTrue);
     b.name = 'CCC app';
     expect(b.name, 'CCC app');
+  });
+
+  test('notifies on post unless that chat is open', () {
+    expect(
+      shouldNotify(kind: 'post', machineId: 'mac', botId: 1, watching: null),
+      isTrue,
+    );
+    expect(
+      shouldNotify(kind: 'progress', machineId: 'mac', botId: 1, watching: null),
+      isFalse,
+    );
+    expect(
+      shouldNotify(
+        kind: 'post',
+        machineId: 'mac',
+        botId: 1,
+        watching: (machine: 'mac', bot: 1),
+      ),
+      isFalse,
+    );
+    expect(
+      shouldNotify(
+        kind: 'post',
+        machineId: 'mac',
+        botId: 1,
+        watching: (machine: 'mac', bot: 2),
+      ),
+      isTrue,
+    );
+  });
+
+  test('parses notification payload', () {
+    final p = parseNotifyPayload('{"machine":"abc","bot_id":9}');
+    expect(p?.machine, 'abc');
+    expect(p?.bot, 9);
+    expect(parseNotifyPayload('nope'), isNull);
   });
 }
