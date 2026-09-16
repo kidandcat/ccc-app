@@ -72,6 +72,7 @@ class BotInfo {
     required this.engine,
     this.last,
     this.lastText,
+    this.progress,
     this.archived = false,
   });
   final int id;
@@ -81,6 +82,7 @@ class BotInfo {
   final String engine;
   final String? last;
   final String? lastText;
+  final String? progress;
   final bool archived;
   factory BotInfo.fromJson(Map<String, dynamic> j) => BotInfo(
         id: (j['id'] as num).toInt(),
@@ -90,18 +92,28 @@ class BotInfo {
         engine: j['engine'] as String? ?? '',
         last: j['last'] as String?,
         lastText: j['last_text'] as String?,
+        progress: j['progress'] as String?,
         archived: j['archived'] as bool? ?? false,
       );
 }
 
 class TurnInfo {
-  TurnInfo({required this.id, required this.source, required this.input, required this.output, required this.status, required this.at});
+  TurnInfo({
+    required this.id,
+    required this.source,
+    required this.input,
+    required this.output,
+    required this.status,
+    required this.at,
+    this.progress,
+  });
   final int id;
   final String source;
   final String input;
   final String output;
   final String status;
   final String at;
+  final String? progress;
   factory TurnInfo.fromJson(Map<String, dynamic> j) => TurnInfo(
         id: (j['id'] as num).toInt(),
         source: j['source'] as String? ?? '',
@@ -109,6 +121,7 @@ class TurnInfo {
         output: j['output'] as String? ?? '',
         status: j['status'] as String? ?? '',
         at: j['at'] as String? ?? '',
+        progress: j['progress'] as String?,
       );
 }
 

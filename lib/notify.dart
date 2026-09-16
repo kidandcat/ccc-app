@@ -9,9 +9,10 @@ bool shouldNotify({
   required String machineId,
   required int botId,
   ({String machine, int bot})? watching,
+  bool foreground = true,
 }) {
   if (kind != 'post') return false;
-  if (watching != null && watching.machine == machineId && watching.bot == botId) {
+  if (foreground && watching != null && watching.machine == machineId && watching.bot == botId) {
     return false;
   }
   return true;

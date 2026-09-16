@@ -30,11 +30,29 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
 
   List<Machine> machines = [];
   final _sessions = <String, HubSession>{};
+  final _progress = <String, String>{};
   ({String machine, int bot})? watching;
+  AppLifecycleState life = AppLifecycleState.resumed;
   void Function(Machine machine, HubSession session, BotInfo bot)? openChat;
+
+  bool get foreground => life == AppLifecycleState.resumed;
+
+  static String progressKey(String machineId, int botId) => '$machineId:$botId';
+
+  String progressFor(String machineId, int botId) => _progress[progressKey(machineId, botId)] ?? '';
+
+  void setProgress(String machineId, int botId, String text) {
+    final k = progressKey(machineId, botId);
+    if (text.isEmpty) {
+      _progress.remove(k);
+    } else {
+      _progress[k] = text;
+    }
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    life = state;
     if (state == AppLifecycleState.resumed) {
       for (final s in _sessions.values) {
         s.wake();
@@ -100,15 +118,28 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
   void _onEvent(Machine m, String kind, Map<String, dynamic> body) {
     final botId = (body['bot_id'] as num?)?.toInt();
     if (botId == null) return;
-    if (!shouldNotify(kind: kind, machineId: m.id, botId: botId, watching: watching)) {
+    final text = (body['text'] as String?)?.trim() ?? '';
+    if (kind == 'progress') {
+      setProgress(m.id, botId, text);
+      return;
+    }
+    if (kind == 'post') {
+      setProgress(m.id, botId, '');
+    }
+    if (!shouldNotify(
+      kind: kind,
+      machineId: m.id,
+      botId: botId,
+      watching: watching,
+      foreground: foreground,
+    )) {
       return;
     }
     final name = (body['bot'] as String?)?.trim();
-    final text = (body['text'] as String?)?.trim();
     Notify.message(
       id: notificationId(m.id, botId),
       title: (name == null || name.isEmpty) ? m.name : name,
-      body: (text == null || text.isEmpty) ? 'New message' : text,
+      body: text.isEmpty ? 'New message' : text,
       payload: jsonEncode({'machine': m.id, 'bot_id': botId}),
     );
   }

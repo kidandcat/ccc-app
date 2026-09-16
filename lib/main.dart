@@ -222,6 +222,7 @@ class _BotsPageState extends State<BotsPage> {
   List<BotInfo> _bots = [];
   String? _err;
   bool _booted = false;
+  final _archiving = <int>{};
 
   @override
   void didChangeDependencies() {
@@ -231,9 +232,21 @@ class _BotsPageState extends State<BotsPage> {
     _boot();
   }
 
+  @override
+  void dispose() {
+    _s?.removeListener(_onHub);
+    super.dispose();
+  }
+
+  void _onHub(String kind, Map<String, dynamic> body) {
+    if (kind != 'progress' && kind != 'post') return;
+    _load();
+  }
+
   Future<void> _boot() async {
     try {
       _s = widget.session ?? CrewScope.read(context).sessionFor(widget.machine);
+      _s!.addListener(_onHub);
       await _s!.connect();
       if (!mounted) return;
       setState(() {});
@@ -249,11 +262,32 @@ class _BotsPageState extends State<BotsPage> {
       final res = await _s!.rpc(widget.archived ? 'archived' : 'bots');
       if (!mounted) return;
       setState(() {
-        _bots = botsFrom(res);
+        _bots = botsFrom(res).where((b) => !_archiving.contains(b.id)).toList();
         _err = null;
       });
     } catch (e) {
       if (mounted) setState(() => _err = '$e');
+    }
+  }
+
+  Future<void> _archiveNow(BotInfo b, int index) async {
+    if (_s == null) return;
+    _archiving.add(b.id);
+    setState(() => _bots.removeWhere((x) => x.id == b.id));
+    try {
+      await _s!.rpc('archive', {'bot_id': b.id});
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (index < 0 || index > _bots.length) {
+          _bots.add(b);
+        } else {
+          _bots.insert(index, b);
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      _archiving.remove(b.id);
     }
   }
 
@@ -340,12 +374,16 @@ class _BotsPageState extends State<BotsPage> {
                                 style: const TextStyle(fontWeight: FontWeight.w700),
                               ),
                               subtitle: Text(
-                                (b.lastText != null && b.lastText!.isNotEmpty)
-                                    ? b.lastText!
-                                    : [b.engine, b.status].where((e) => e.isNotEmpty).join(' · '),
+                                (b.progress != null && b.progress!.isNotEmpty)
+                                    ? b.progress!
+                                    : (b.lastText != null && b.lastText!.isNotEmpty)
+                                        ? b.lastText!
+                                        : [b.engine, b.status].where((e) => e.isNotEmpty).join(' · '),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: _muted),
+                                style: TextStyle(
+                                  color: (b.progress != null && b.progress!.isNotEmpty) ? _gold : _muted,
+                                ),
                               ),
                               trailing: widget.archived
                                   ? TextButton(onPressed: () => _unarchive(b), child: const Text('Restore'))
@@ -364,20 +402,7 @@ class _BotsPageState extends State<BotsPage> {
                             return Dismissible(
                               key: ValueKey(b.id),
                               direction: DismissDirection.endToStart,
-                              confirmDismiss: (_) async {
-                                if (_s == null) return false;
-                                final messenger = ScaffoldMessenger.of(context);
-                                try {
-                                  await _s!.rpc('archive', {'bot_id': b.id});
-                                  return true;
-                                } catch (e) {
-                                  messenger.showSnackBar(SnackBar(content: Text('$e')));
-                                  return false;
-                                }
-                              },
-                              onDismissed: (_) {
-                                setState(() => _bots.removeWhere((x) => x.id == b.id));
-                              },
+                              onDismissed: (_) => _archiveNow(b, i),
                               background: Container(
                                 alignment: Alignment.centerRight,
                                 padding: const EdgeInsets.only(right: 20),
@@ -424,6 +449,12 @@ class _ChatPageState extends State<ChatPage> {
     _crew = CrewScope.of(context);
     _crew!.watchChat(widget.machine, widget.bot.id);
     widget.session.addListener(_onHub);
+    final cached = _crew!.progressFor(widget.machine.id, widget.bot.id);
+    if (cached.isNotEmpty) {
+      _progress = cached;
+    } else if (widget.bot.progress != null && widget.bot.progress!.isNotEmpty) {
+      _progress = widget.bot.progress!;
+    }
     _load();
   }
 
@@ -431,9 +462,14 @@ class _ChatPageState extends State<ChatPage> {
     if (!mounted) return;
     if ((body['bot_id'] as num?)?.toInt() != widget.bot.id) return;
     if (kind == 'progress') {
-      setState(() => _progress = body['text'] as String? ?? '');
+      final text = body['text'] as String? ?? '';
+      _crew?.setProgress(widget.machine.id, widget.bot.id, text);
+      setState(() => _progress = text);
       _toBottom();
     } else {
+      if (kind == 'post') {
+        _crew?.setProgress(widget.machine.id, widget.bot.id, '');
+      }
       _load();
     }
   }
@@ -466,9 +502,21 @@ class _ChatPageState extends State<ChatPage> {
       }
     }
     if (!mounted) return;
+    final last = list.isEmpty ? null : list.last;
+    final running = last != null && (last.status == 'running' || last.status == 'queued');
+    var progress = '';
+    if (running) {
+      progress = _crew?.progressFor(widget.machine.id, widget.bot.id) ?? '';
+      if (progress.isEmpty) {
+        progress = last.progress ?? '';
+      }
+      if (progress.isEmpty) progress = _progress;
+    } else {
+      _crew?.setProgress(widget.machine.id, widget.bot.id, '');
+    }
     setState(() {
       _turns = list;
-      _progress = '';
+      _progress = progress;
     });
     _toBottom();
   }

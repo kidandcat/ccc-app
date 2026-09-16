@@ -27,7 +27,7 @@ void main() {
     expect(b.name, 'CCC app');
   });
 
-  test('notifies on post unless that chat is open', () {
+  test('notifies on post unless that chat is open in the foreground', () {
     expect(
       shouldNotify(kind: 'post', machineId: 'mac', botId: 1, watching: null),
       isTrue,
@@ -54,6 +54,39 @@ void main() {
       ),
       isTrue,
     );
+    expect(
+      shouldNotify(
+        kind: 'post',
+        machineId: 'mac',
+        botId: 1,
+        watching: (machine: 'mac', bot: 1),
+        foreground: false,
+      ),
+      isTrue,
+    );
+  });
+
+  test('parses live progress on bots and turns', () {
+    final b = BotInfo.fromJson({
+      'id': 3,
+      'name': 'Build',
+      'role': '',
+      'status': 'running',
+      'engine': 'grok',
+      'progress': 'reading main.dart · 8s',
+    });
+    expect(b.progress, 'reading main.dart · 8s');
+    final t = TurnInfo.fromJson({
+      'id': 1,
+      'source': 'user',
+      'input': 'hi',
+      'output': '',
+      'status': 'running',
+      'at': '2026-09-16T12:00:00Z',
+      'progress': 'thinking · 3s',
+    });
+    expect(t.progress, 'thinking · 3s');
+    expect(t.status, 'running');
   });
 
   test('parses notification payload', () {
