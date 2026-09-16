@@ -13,5 +13,5 @@ Pairing is TOFU. `ccc pair` prints a URI whose query carries the instance public
 - Session list on a machine (live, most recently active first)
 - Rename a session (tap the title)
 - Archive a session (swipe, no confirm) so it leaves the main list; restore from Archived
-- Chat with one session (history + send + photos + live progress that survives leaving and coming back)
-- Push notification on the phone when a session posts a new message, including when the app is in the background (Android keeps the hub socket alive in a foreground service)
+- Chat with one session (history + send + photos + live thinking/tool progress that is restored when you leave and come back)
+- Push notification on the phone when a session posts a new message, including when the app is in the background (Android keeps the hub socket alive in a dataSync foreground service)

@@ -50,6 +50,26 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// Pick the live thinking/tool line to show when reopening a chat.
+  /// Cached hub events win; otherwise the history/bots payload; never drop a
+  /// running turn just because we left the screen.
+  static String resolveProgress({
+    required String? status,
+    String? turnProgress,
+    String cached = '',
+    String current = '',
+  }) {
+    final live = (turnProgress ?? '').trim();
+    final run = status == 'running' || status == 'queued';
+    if (!run && live.isEmpty) return '';
+    final c = cached.trim();
+    if (c.isNotEmpty) return c;
+    if (live.isNotEmpty) return live;
+    final cur = current.trim();
+    if (cur.isNotEmpty) return cur;
+    return status == 'queued' ? 'queued' : 'working';
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     life = state;
@@ -165,10 +185,12 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _syncListen() async {
-    if (machines.isEmpty) {
-      await Notify.stopListening();
-      return;
-    }
-    await Notify.startListening(machines: machines.length);
+    try {
+      if (machines.isEmpty) {
+        await Notify.stopListening();
+        return;
+      }
+      await Notify.startListening(machines: machines.length);
+    } catch (_) {}
   }
 }

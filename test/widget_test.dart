@@ -1,3 +1,4 @@
+import 'package:ccc_app/crew.dart';
 import 'package:ccc_app/hub.dart';
 import 'package:ccc_app/notify.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -64,6 +65,28 @@ void main() {
       ),
       isTrue,
     );
+  });
+
+  test('keeps thinking text when reopening a running turn', () {
+    expect(
+      Crew.resolveProgress(status: 'running', turnProgress: 'reading main.dart · 8s'),
+      'reading main.dart · 8s',
+    );
+    expect(
+      Crew.resolveProgress(
+        status: 'running',
+        turnProgress: 'working',
+        cached: 'call grep · 3s',
+      ),
+      'call grep · 3s',
+    );
+    expect(
+      Crew.resolveProgress(status: 'running', turnProgress: '', current: 'thinking · 2s'),
+      'thinking · 2s',
+    );
+    expect(Crew.resolveProgress(status: 'running', turnProgress: ''), 'working');
+    expect(Crew.resolveProgress(status: 'queued', turnProgress: ''), 'queued');
+    expect(Crew.resolveProgress(status: 'done', turnProgress: ''), '');
   });
 
   test('parses live progress on bots and turns', () {

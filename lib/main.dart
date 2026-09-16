@@ -449,12 +449,11 @@ class _ChatPageState extends State<ChatPage> {
     _crew = CrewScope.of(context);
     _crew!.watchChat(widget.machine, widget.bot.id);
     widget.session.addListener(_onHub);
-    final cached = _crew!.progressFor(widget.machine.id, widget.bot.id);
-    if (cached.isNotEmpty) {
-      _progress = cached;
-    } else if (widget.bot.progress != null && widget.bot.progress!.isNotEmpty) {
-      _progress = widget.bot.progress!;
-    }
+    _progress = Crew.resolveProgress(
+      status: widget.bot.status,
+      turnProgress: widget.bot.progress,
+      cached: _crew!.progressFor(widget.machine.id, widget.bot.id),
+    );
     _load();
   }
 
@@ -492,33 +491,35 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _load() async {
-    final res = await widget.session.rpc('history', {'bot_id': widget.bot.id, 'limit': 50});
-    final body = res['body'];
-    final raw = body is String ? jsonDecode(body) : body;
-    final list = <TurnInfo>[];
-    if (raw is List) {
-      for (final e in raw) {
-        list.add(TurnInfo.fromJson(e as Map<String, dynamic>));
+    try {
+      final res = await widget.session.rpc('history', {'bot_id': widget.bot.id, 'limit': 50});
+      final body = res['body'];
+      final raw = body is String ? jsonDecode(body) : body;
+      final list = <TurnInfo>[];
+      if (raw is List) {
+        for (final e in raw) {
+          list.add(TurnInfo.fromJson(e as Map<String, dynamic>));
+        }
       }
-    }
-    if (!mounted) return;
-    final last = list.isEmpty ? null : list.last;
-    final running = last != null && (last.status == 'running' || last.status == 'queued');
-    var progress = '';
-    if (running) {
-      progress = _crew?.progressFor(widget.machine.id, widget.bot.id) ?? '';
+      if (!mounted) return;
+      final last = list.isEmpty ? null : list.last;
+      final progress = Crew.resolveProgress(
+        status: last?.status,
+        turnProgress: last?.progress,
+        cached: _crew?.progressFor(widget.machine.id, widget.bot.id) ?? '',
+        current: _progress,
+      );
       if (progress.isEmpty) {
-        progress = last.progress ?? '';
+        _crew?.setProgress(widget.machine.id, widget.bot.id, '');
       }
-      if (progress.isEmpty) progress = _progress;
-    } else {
-      _crew?.setProgress(widget.machine.id, widget.bot.id, '');
+      setState(() {
+        _turns = list;
+        _progress = progress;
+      });
+      _toBottom();
+    } catch (e) {
+      if (mounted) setState(() {});
     }
-    setState(() {
-      _turns = list;
-      _progress = progress;
-    });
-    _toBottom();
   }
 
   Future<void> _rename() async {
