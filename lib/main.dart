@@ -257,16 +257,6 @@ class _BotsPageState extends State<BotsPage> {
     }
   }
 
-  Future<void> _archive(BotInfo b) async {
-    if (_s == null) return;
-    try {
-      await _s!.rpc('archive', {'bot_id': b.id});
-      await _load();
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-    }
-  }
-
   Future<void> _unarchive(BotInfo b) async {
     if (_s == null) return;
     try {
@@ -375,8 +365,18 @@ class _BotsPageState extends State<BotsPage> {
                               key: ValueKey(b.id),
                               direction: DismissDirection.endToStart,
                               confirmDismiss: (_) async {
-                                await _archive(b);
-                                return false;
+                                if (_s == null) return false;
+                                final messenger = ScaffoldMessenger.of(context);
+                                try {
+                                  await _s!.rpc('archive', {'bot_id': b.id});
+                                  return true;
+                                } catch (e) {
+                                  messenger.showSnackBar(SnackBar(content: Text('$e')));
+                                  return false;
+                                }
+                              },
+                              onDismissed: (_) {
+                                setState(() => _bots.removeWhere((x) => x.id == b.id));
                               },
                               background: Container(
                                 alignment: Alignment.centerRight,

@@ -179,6 +179,19 @@ class HubSession {
     await _opening;
   }
 
+  void wake() {
+    _want = true;
+    if (_ch == null) {
+      connect();
+      return;
+    }
+    try {
+      _ch!.sink.add(jsonEncode({'v': 1, 't': 'ping'}));
+    } catch (_) {
+      _dropped();
+    }
+  }
+
   Future<void> _open() async {
     await _tear();
     if (!_want) return;

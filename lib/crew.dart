@@ -21,8 +21,10 @@ class CrewScope extends InheritedNotifier<Crew> {
   }
 }
 
-class Crew extends ChangeNotifier {
-  Crew(this.identity);
+class Crew extends ChangeNotifier with WidgetsBindingObserver {
+  Crew(this.identity) {
+    WidgetsBinding.instance.addObserver(this);
+  }
   final HubIdentity identity;
   final navKey = GlobalKey<NavigatorState>();
 
@@ -30,6 +32,15 @@ class Crew extends ChangeNotifier {
   final _sessions = <String, HubSession>{};
   ({String machine, int bot})? watching;
   void Function(Machine machine, HubSession session, BotInfo bot)? openChat;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      for (final s in _sessions.values) {
+        s.wake();
+      }
+    }
+  }
 
   Future<void> load() async {
     machines = await Store.load();
