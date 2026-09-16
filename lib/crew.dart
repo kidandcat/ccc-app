@@ -143,7 +143,7 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
       setProgress(m.id, botId, text);
       return;
     }
-    if (kind == 'post') {
+    if (kind == 'post' || kind == 'file') {
       setProgress(m.id, botId, '');
     }
     if (!shouldNotify(

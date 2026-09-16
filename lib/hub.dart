@@ -97,6 +97,64 @@ class BotInfo {
       );
 }
 
+class FileInfo {
+  FileInfo({required this.id, required this.name, required this.mime, required this.size});
+  final int id;
+  final String name;
+  final String mime;
+  final int size;
+  factory FileInfo.fromJson(Map<String, dynamic> j) => FileInfo(
+        id: (j['id'] as num).toInt(),
+        name: j['name'] as String? ?? 'file',
+        mime: j['mime'] as String? ?? 'application/octet-stream',
+        size: (j['size'] as num?)?.toInt() ?? 0,
+      );
+}
+
+class PendingAttach {
+  PendingAttach({required this.name, required this.mime, required this.bytes});
+  final String name;
+  final String mime;
+  final Uint8List bytes;
+  bool get isImage => mime.startsWith('image/');
+}
+
+String fmtSize(int n) {
+  if (n < 1024) return '$n B';
+  if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(n < 10 * 1024 ? 1 : 0)} KB';
+  return '${(n / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+String mimeForName(String name) {
+  final i = name.lastIndexOf('.');
+  final ext = i < 0 ? '' : name.substring(i).toLowerCase();
+  switch (ext) {
+    case '.apk':
+      return 'application/vnd.android.package-archive';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.gif':
+      return 'image/gif';
+    case '.webp':
+      return 'image/webp';
+    case '.pdf':
+      return 'application/pdf';
+    case '.zip':
+      return 'application/zip';
+    case '.txt':
+      return 'text/plain';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+const hubFileInlineMax = 400 * 1024;
+const hubChunkBytes = 96 * 1024;
+const hubFileMaxBytes = 50 * 1024 * 1024;
+
 class TurnInfo {
   TurnInfo({
     required this.id,
@@ -106,6 +164,7 @@ class TurnInfo {
     required this.status,
     required this.at,
     this.progress,
+    this.files = const [],
   });
   final int id;
   final String source;
@@ -114,15 +173,26 @@ class TurnInfo {
   final String status;
   final String at;
   final String? progress;
-  factory TurnInfo.fromJson(Map<String, dynamic> j) => TurnInfo(
-        id: (j['id'] as num).toInt(),
-        source: j['source'] as String? ?? '',
-        input: j['input'] as String? ?? '',
-        output: j['output'] as String? ?? '',
-        status: j['status'] as String? ?? '',
-        at: j['at'] as String? ?? '',
-        progress: j['progress'] as String?,
-      );
+  final List<FileInfo> files;
+  factory TurnInfo.fromJson(Map<String, dynamic> j) {
+    final files = <FileInfo>[];
+    final raw = j['files'];
+    if (raw is List) {
+      for (final e in raw) {
+        if (e is Map<String, dynamic>) files.add(FileInfo.fromJson(e));
+      }
+    }
+    return TurnInfo(
+      id: (j['id'] as num).toInt(),
+      source: j['source'] as String? ?? '',
+      input: j['input'] as String? ?? '',
+      output: j['output'] as String? ?? '',
+      status: j['status'] as String? ?? '',
+      at: j['at'] as String? ?? '',
+      progress: j['progress'] as String?,
+      files: files,
+    );
+  }
 }
 
 class Store {
@@ -360,6 +430,100 @@ class HubSession {
       throw rpc['error'] ?? 'error';
     }
     return rpc;
+  }
+
+  Map<String, dynamic> _rpcBody(Map<String, dynamic> rpc) {
+    final body = rpc['body'];
+    if (body is Map<String, dynamic>) return body;
+    if (body is String && body.isNotEmpty) {
+      final j = jsonDecode(body);
+      if (j is Map<String, dynamic>) return j;
+    }
+    return {};
+  }
+
+  Future<void> sendBytes({
+    required int botId,
+    required String name,
+    required String mime,
+    required Uint8List bytes,
+    String text = '',
+  }) async {
+    if (bytes.length > hubFileMaxBytes) {
+      throw 'File is too large (max 50 MB)';
+    }
+    if (bytes.length <= hubFileInlineMax) {
+      await rpc(
+        'send',
+        {
+          'bot_id': botId,
+          if (text.isNotEmpty) 'text': text,
+          'file': {
+            'name': name,
+            'mime': mime,
+            'data': base64Encode(bytes),
+          },
+        },
+        const Duration(seconds: 40),
+      );
+      return;
+    }
+    final begin = _rpcBody(await rpc(
+      'put_begin',
+      {
+        'bot_id': botId,
+        'name': name,
+        'mime': mime,
+        'size': bytes.length,
+        if (text.isNotEmpty) 'text': text,
+      },
+    ));
+    final uploadId = begin['upload_id'] as String? ?? '';
+    final n = (begin['n'] as num?)?.toInt() ?? 1;
+    if (uploadId.isEmpty) throw 'upload failed';
+    for (var i = 0; i < n; i++) {
+      final start = i * hubChunkBytes;
+      var end = start + hubChunkBytes;
+      if (end > bytes.length) end = bytes.length;
+      await rpc(
+        'put_chunk',
+        {
+          'upload_id': uploadId,
+          'i': i,
+          'data': base64Encode(bytes.sublist(start, end)),
+        },
+        const Duration(seconds: 40),
+      );
+    }
+    await rpc(
+      'put_commit',
+      {
+        'upload_id': uploadId,
+        if (text.isNotEmpty) 'text': text,
+      },
+      const Duration(seconds: 40),
+    );
+  }
+
+  Future<Uint8List> fetchFile(int fileId) async {
+    final first = _rpcBody(await rpc('get_chunk', {'file_id': fileId, 'i': 0}, const Duration(seconds: 40)));
+    final n = (first['n'] as num?)?.toInt() ?? 1;
+    final size = (first['size'] as num?)?.toInt() ?? 0;
+    final out = BytesBuilder(copy: false);
+    void addChunk(Map<String, dynamic> chunk) {
+      final data = chunk['data'] as String? ?? '';
+      out.add(base64Decode(data));
+    }
+
+    addChunk(first);
+    for (var i = 1; i < n; i++) {
+      addChunk(_rpcBody(await rpc('get_chunk', {'file_id': fileId, 'i': i}, const Duration(seconds: 40))));
+    }
+    final bytes = out.toBytes();
+    if (size > 0 && bytes.length != size) {
+      throw 'download truncated (${bytes.length}/$size)';
+    }
+    return bytes;
   }
 
   (Uint8List, Uint8List) _seal(List<int> plain, String theirHex) {

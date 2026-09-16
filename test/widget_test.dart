@@ -67,6 +67,26 @@ void main() {
       ),
       isTrue,
     );
+    expect(shouldNotify(kind: 'file', machineId: 'mac', botId: 1, watching: null), isTrue);
+  });
+
+  test('parses file attachments on turns', () {
+    final t = TurnInfo.fromJson({
+      'id': 1,
+      'source': 'user',
+      'input': 'install this',
+      'output': '',
+      'status': 'done',
+      'at': '2026-09-16T12:00:00Z',
+      'files': [
+        {'id': 9, 'name': 'ccc.apk', 'mime': 'application/vnd.android.package-archive', 'size': 19300000},
+      ],
+    });
+    expect(t.files, hasLength(1));
+    expect(t.files.first.name, 'ccc.apk');
+    expect(t.files.first.size, 19300000);
+    expect(fmtSize(19300000), contains('MB'));
+    expect(mimeForName('ccc.apk'), 'application/vnd.android.package-archive');
   });
 
   test('keeps thinking text when reopening a running turn', () {

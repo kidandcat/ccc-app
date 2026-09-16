@@ -13,5 +13,6 @@ Pairing is TOFU. `ccc pair` prints a URI whose query carries the instance public
 - Session list on a machine (live, most recently active first)
 - Rename a session (tap the title)
 - Archive a session (swipe, no confirm) so it leaves the main list; restore from Archived
-- Chat with one session (history + send + photos + GitHub-flavored Markdown including tables + live thinking/tool progress that is restored when you leave and come back)
+- Chat with one session (history + send + photos + any file up to 50 MB including APKs + GitHub-flavored Markdown including tables + live thinking/tool progress that is restored when you leave and come back)
+- Receive files the session sends (`send_file`): tap the chip to download and share/save
 - Push notification on the phone when a session posts a new message, including when the app is in the background (Android keeps the hub socket alive in a dataSync foreground service)

@@ -11,7 +11,7 @@ bool shouldNotify({
   ({String machine, int bot})? watching,
   bool foreground = true,
 }) {
-  if (kind != 'post') return false;
+  if (kind != 'post' && kind != 'file') return false;
   if (foreground && watching != null && watching.machine == machineId && watching.bot == botId) {
     return false;
   }

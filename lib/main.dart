@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -240,7 +240,7 @@ class _BotsPageState extends State<BotsPage> {
   }
 
   void _onHub(String kind, Map<String, dynamic> body) {
-    if (kind != 'progress' && kind != 'post') return;
+    if (kind != 'progress' && kind != 'post' && kind != 'file') return;
     _load();
   }
 
@@ -437,8 +437,9 @@ class _ChatPageState extends State<ChatPage> {
   final _scroll = ScrollController();
   List<TurnInfo> _turns = [];
   String _progress = '';
-  Uint8List? _pendingImage;
+  PendingAttach? _pending;
   bool _sending = false;
+  final _fetching = <int>{};
   Crew? _crew;
   bool _listening = false;
 
@@ -467,7 +468,7 @@ class _ChatPageState extends State<ChatPage> {
       setState(() => _progress = text);
       _toBottom();
     } else {
-      if (kind == 'post') {
+      if (kind == 'post' || kind == 'file') {
         _crew?.setProgress(widget.machine.id, widget.bot.id, '');
       }
       _load();
@@ -561,7 +562,22 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
     if (!mounted) return;
-    setState(() => _pendingImage = bytes);
+    setState(() => _pending = PendingAttach(name: 'photo.jpg', mime: 'image/jpeg', bytes: bytes));
+  }
+
+  Future<void> _pickFile() async {
+    final f = await FilePicker.pickFile();
+    if (f == null) return;
+    final bytes = await f.readAsBytes();
+    if (bytes.length > hubFileMaxBytes) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File is too large (max 50 MB)')));
+      }
+      return;
+    }
+    if (!mounted) return;
+    final name = (f.name.trim().isEmpty) ? 'file' : f.name;
+    setState(() => _pending = PendingAttach(name: name, mime: mimeForName(name), bytes: bytes));
   }
 
   Future<void> _attach() async {
@@ -572,6 +588,15 @@ class _ChatPageState extends State<ChatPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.attach_file, color: _gold),
+              title: const Text('File'),
+              subtitle: const Text('APK, zip, pdf, …'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickFile();
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined, color: _gold),
               title: const Text('Photo library'),
@@ -594,33 +619,55 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  Future<void> _openFile(FileInfo f) async {
+    if (_fetching.contains(f.id)) return;
+    setState(() => _fetching.add(f.id));
+    try {
+      final bytes = await widget.session.fetchFile(f.id);
+      if (!mounted) return;
+      final uri = await FilePicker.saveFile(
+        dialogTitle: 'Save ${f.name}',
+        fileName: f.name,
+        bytes: bytes,
+      );
+      if (uri != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved ${f.name}')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _fetching.remove(f.id));
+    }
+  }
+
   Future<void> _send() async {
     final t = _c.text.trim();
-    final img = _pendingImage;
-    if (t.isEmpty && img == null) return;
+    final att = _pending;
+    if (t.isEmpty && att == null) return;
     if (_sending) return;
     _focus.unfocus();
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _sending = true;
-      _pendingImage = null;
+      _pending = null;
     });
     _c.clear();
     try {
-      await widget.session.rpc(
-        'send',
-        {
-          'bot_id': widget.bot.id,
-          if (t.isNotEmpty) 'text': t,
-          if (img != null)
-            'image': {
-              'mime': 'image/jpeg',
-              'name': 'photo.jpg',
-              'data': base64Encode(img),
-            },
-        },
-        const Duration(seconds: 40),
-      );
+      if (att != null) {
+        await widget.session.sendBytes(
+          botId: widget.bot.id,
+          name: att.name,
+          mime: att.mime,
+          bytes: att.bytes,
+          text: t,
+        );
+      } else {
+        await widget.session.rpc(
+          'send',
+          {'bot_id': widget.bot.id, 'text': t},
+          const Duration(seconds: 40),
+        );
+      }
       await _load();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -691,6 +738,14 @@ class _ChatPageState extends State<ChatPage> {
                         const SizedBox(height: 8),
                         MdBody(t.output),
                       ],
+                      for (final f in t.files) ...[
+                        const SizedBox(height: 8),
+                        _FileChip(
+                          file: f,
+                          busy: _fetching.contains(f.id),
+                          onTap: () => _openFile(f),
+                        ),
+                      ],
                     ],
                   ),
                 );
@@ -702,17 +757,41 @@ class _ChatPageState extends State<ChatPage> {
               padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
               child: Column(
                 children: [
-                  if (_pendingImage != null)
+                  if (_pending != null)
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Padding(
                         padding: const EdgeInsets.only(left: 8, bottom: 8),
                         child: Stack(
                           children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: Image.memory(_pendingImage!, height: 72, fit: BoxFit.cover),
-                            ),
+                            if (_pending!.isImage)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: Image.memory(_pending!.bytes, height: 72, fit: BoxFit.cover),
+                              )
+                            else
+                              Container(
+                                padding: const EdgeInsets.fromLTRB(12, 10, 36, 10),
+                                decoration: BoxDecoration(
+                                  color: _panel,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: _line),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.insert_drive_file_outlined, color: _gold, size: 18),
+                                    const SizedBox(width: 8),
+                                    ConstrainedBox(
+                                      constraints: const BoxConstraints(maxWidth: 220),
+                                      child: Text(
+                                        '${_pending!.name} · ${fmtSize(_pending!.bytes.length)}',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             Positioned(
                               top: 0,
                               right: 0,
@@ -724,7 +803,7 @@ class _ChatPageState extends State<ChatPage> {
                                   minimumSize: const Size(28, 28),
                                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                 ),
-                                onPressed: () => setState(() => _pendingImage = null),
+                                onPressed: () => setState(() => _pending = null),
                                 icon: const Icon(Icons.close, size: 14),
                               ),
                             ),
@@ -736,7 +815,7 @@ class _ChatPageState extends State<ChatPage> {
                     children: [
                       IconButton(
                         onPressed: _sending ? null : _attach,
-                        icon: const Icon(Icons.add_photo_alternate_outlined, color: _gold),
+                        icon: const Icon(Icons.attach_file, color: _gold),
                       ),
                       Expanded(
                         child: TextField(
@@ -771,6 +850,54 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FileChip extends StatelessWidget {
+  const _FileChip({required this.file, required this.busy, required this.onTap});
+  final FileInfo file;
+  final bool busy;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _panel,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: _line),
+      ),
+      child: InkWell(
+        onTap: busy ? null : onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          child: Row(
+            children: [
+              Icon(
+                file.mime.startsWith('image/') ? Icons.image_outlined : Icons.insert_drive_file_outlined,
+                color: _gold,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text(fmtSize(file.size), style: const TextStyle(color: _muted, fontSize: 12)),
+                  ],
+                ),
+              ),
+              if (busy)
+                const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _gold))
+              else
+                const Icon(Icons.save_alt, color: _muted, size: 18),
+            ],
+          ),
+        ),
       ),
     );
   }
