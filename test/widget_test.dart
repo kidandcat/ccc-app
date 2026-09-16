@@ -1,6 +1,8 @@
 import 'package:ccc_app/crew.dart';
 import 'package:ccc_app/hub.dart';
+import 'package:ccc_app/md.dart';
 import 'package:ccc_app/notify.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -110,6 +112,27 @@ void main() {
     });
     expect(t.progress, 'thinking · 3s');
     expect(t.status, 'running');
+  });
+
+  testWidgets('renders markdown tables and emphasis', (tester) async {
+    const md = '''
+**hello**
+
+| col | n |
+| --- | - |
+| a   | 1 |
+''';
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: SingleChildScrollView(child: MdBody(md))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('hello'), findsOneWidget);
+    expect(find.text('col'), findsOneWidget);
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget);
+    expect(find.byType(Table), findsOneWidget);
   });
 
   test('parses notification payload', () {

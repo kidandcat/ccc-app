@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'crew.dart';
 import 'hub.dart';
+import 'md.dart';
 import 'notify.dart';
 
 const _ink = Color(0xFF0E1116);
@@ -674,21 +675,21 @@ class _ChatPageState extends State<ChatPage> {
                       if (t.input.isNotEmpty)
                         Align(
                           alignment: Alignment.centerRight,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: _gold.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(14),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: _gold.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: MdBody(t.input),
                             ),
-                            child: Text(t.input),
                           ),
                         ),
                       if (t.output.isNotEmpty) ...[
                         const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(t.output, style: const TextStyle(height: 1.45)),
-                        ),
+                        MdBody(t.output),
                       ],
                     ],
                   ),
