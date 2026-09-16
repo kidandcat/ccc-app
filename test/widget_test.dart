@@ -9,4 +9,20 @@ void main() {
     expect(p.instanceId, 'ab');
     expect(p.code, 'c0ffee');
   });
+
+  test('parses bot last_text and archived', () {
+    final b = BotInfo.fromJson({
+      'id': 9,
+      'name': 'Build APK',
+      'role': '',
+      'status': 'idle',
+      'engine': 'grok',
+      'last_text': 'sent the apk',
+      'archived': true,
+    });
+    expect(b.lastText, 'sent the apk');
+    expect(b.archived, isTrue);
+    b.name = 'CCC app';
+    expect(b.name, 'CCC app');
+  });
 }

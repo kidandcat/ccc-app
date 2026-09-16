@@ -62,13 +62,24 @@ class Machine {
 }
 
 class BotInfo {
-  BotInfo({required this.id, required this.name, required this.role, required this.status, required this.engine, this.last});
+  BotInfo({
+    required this.id,
+    required this.name,
+    required this.role,
+    required this.status,
+    required this.engine,
+    this.last,
+    this.lastText,
+    this.archived = false,
+  });
   final int id;
-  final String name;
+  String name;
   final String role;
   final String status;
   final String engine;
   final String? last;
+  final String? lastText;
+  final bool archived;
   factory BotInfo.fromJson(Map<String, dynamic> j) => BotInfo(
         id: (j['id'] as num).toInt(),
         name: j['name'] as String? ?? '',
@@ -76,6 +87,8 @@ class BotInfo {
         status: j['status'] as String? ?? '',
         engine: j['engine'] as String? ?? '',
         last: j['last'] as String?,
+        lastText: j['last_text'] as String?,
+        archived: j['archived'] as bool? ?? false,
       );
 }
 
@@ -189,7 +202,11 @@ class HubSession {
     return c.future.timeout(const Duration(seconds: 20));
   }
 
-  Future<Map<String, dynamic>> rpc(String method, [Map<String, dynamic>? params]) async {
+  Future<Map<String, dynamic>> rpc(
+    String method, [
+    Map<String, dynamic>? params,
+    Duration timeout = const Duration(seconds: 20),
+  ]) async {
     final id = '${++_rpc}';
     final c = Completer<Map<String, dynamic>>();
     _pending[id] = c;
@@ -197,7 +214,7 @@ class HubSession {
       'kind': 'req',
       'id': id,
       'method': method,
-      if (params != null) 'params': params,
+      'params': ?params,
     });
     final sealed = _seal(utf8.encode(payload), machine.pk);
     _ch!.sink.add(jsonEncode({
@@ -208,7 +225,11 @@ class HubSession {
       'n': _b64e(sealed.$1),
       'b': _b64e(sealed.$2),
     }));
-    return c.future.timeout(const Duration(seconds: 20));
+    final rpc = await c.future.timeout(timeout);
+    if (rpc['ok'] == false) {
+      throw rpc['error'] ?? 'error';
+    }
+    return rpc;
   }
 
   (Uint8List, Uint8List) _seal(List<int> plain, String theirHex) {

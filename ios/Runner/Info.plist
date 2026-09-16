@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>CCC attaches photos you pick to a session on your machine.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>CCC attaches a photo you take to a session on your machine.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>CCC only reads the photo you choose to send.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

@@ -10,5 +10,7 @@ Pairing is TOFU. `ccc pair` prints a URI whose query carries the instance public
 
 - Machine list (several ccc instances: Mac, VPS, …)
 - Pair a machine (paste URI from `ccc pair`)
-- Bot list on a machine
-- Chat with one bot (history + send + live progress)
+- Session list on a machine (live, most recently active first)
+- Rename a session (tap the title)
+- Archive a session (swipe) so it leaves the main list; restore from Archived
+- Chat with one session (history + send + photos + live progress)

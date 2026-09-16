@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'hub.dart';
@@ -12,6 +14,8 @@ const _line = Color(0xFF2A3340);
 const _text = Color(0xFFE8EDF4);
 const _muted = Color(0xFF8B97A8);
 const _gold = Color(0xFFD4A84B);
+
+const _maxImageBytes = 350 * 1024;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -59,6 +63,43 @@ class Store {
     final p = await SharedPreferences.getInstance();
     await p.setStringList(_k, ms.map((e) => jsonEncode(e.toJson())).toList());
   }
+}
+
+List<BotInfo> _botsFrom(Map<String, dynamic> res) {
+  final body = res['body'];
+  final raw = body is String ? jsonDecode(body) : body;
+  final list = <BotInfo>[];
+  if (raw is List) {
+    for (final e in raw) {
+      list.add(BotInfo.fromJson(e as Map<String, dynamic>));
+    }
+  }
+  return list;
+}
+
+Future<String?> _askName(BuildContext context, {required String title, String initial = ''}) {
+  final c = TextEditingController(text: initial);
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: _panel,
+      title: Text(title),
+      content: TextField(
+        controller: c,
+        autofocus: true,
+        maxLength: 64,
+        decoration: const InputDecoration(
+          hintText: 'Session name',
+          counterText: '',
+        ),
+        onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Save')),
+      ],
+    ),
+  );
 }
 
 class MachinesPage extends StatefulWidget {
@@ -182,8 +223,10 @@ class _MachinesPageState extends State<MachinesPage> {
 }
 
 class BotsPage extends StatefulWidget {
-  const BotsPage({super.key, required this.machine});
+  const BotsPage({super.key, required this.machine, this.session, this.archived = false});
   final Machine machine;
+  final HubSession? session;
+  final bool archived;
   @override
   State<BotsPage> createState() => _BotsPageState();
 }
@@ -201,22 +244,30 @@ class _BotsPageState extends State<BotsPage> {
 
   Future<void> _boot() async {
     try {
+      if (widget.session != null) {
+        _s = widget.session;
+        await _load();
+        return;
+      }
       final id = await HubSession.loadIdentity();
       final s = HubSession(id, widget.machine);
       await s.connect();
-      final res = await s.rpc('bots');
-      final body = res['body'];
-      final list = <BotInfo>[];
-      final raw = body is String ? jsonDecode(body) : body;
-      if (raw is List) {
-        for (final e in raw) {
-          list.add(BotInfo.fromJson(e as Map<String, dynamic>));
-        }
-      }
+      if (!mounted) return;
+      setState(() => _s = s);
+      await _load();
+    } catch (e) {
+      if (mounted) setState(() => _err = '$e');
+    }
+  }
+
+  Future<void> _load() async {
+    if (_s == null) return;
+    try {
+      final res = await _s!.rpc(widget.archived ? 'archived' : 'bots');
       if (!mounted) return;
       setState(() {
-        _s = s;
-        _bots = list;
+        _bots = _botsFrom(res);
+        _err = null;
       });
     } catch (e) {
       if (mounted) setState(() => _err = '$e');
@@ -225,40 +276,158 @@ class _BotsPageState extends State<BotsPage> {
 
   @override
   void dispose() {
-    _s?.close();
+    if (widget.session == null) _s?.close();
     super.dispose();
+  }
+
+  Future<void> _archive(BotInfo b) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _panel,
+        title: const Text('Archive session?'),
+        content: Text(
+          '“${b.name}” leaves the main list and its Telegram topic is closed. Restore it later from Archived.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Archive')),
+        ],
+      ),
+    );
+    if (ok != true || _s == null) return;
+    try {
+      await _s!.rpc('archive', {'bot_id': b.id});
+      await _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _unarchive(BotInfo b) async {
+    if (_s == null) return;
+    try {
+      await _s!.rpc('unarchive', {'bot_id': b.id});
+      await _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _rename(BotInfo b) async {
+    final name = await _askName(context, title: 'Rename session', initial: b.name);
+    if (name == null || name.isEmpty || name == b.name || _s == null) return;
+    try {
+      await _s!.rpc('rename', {'bot_id': b.id, 'name': name});
+      await _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.machine.name)),
+      appBar: AppBar(
+        title: Text(
+          widget.archived ? 'Archived' : widget.machine.name,
+          style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700),
+        ),
+        actions: [
+          if (!widget.archived && _s != null)
+            IconButton(
+              tooltip: 'Archived sessions',
+              icon: const Icon(Icons.inventory_2_outlined),
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BotsPage(machine: widget.machine, session: _s, archived: true),
+                  ),
+                );
+                _load();
+              },
+            ),
+        ],
+      ),
       body: _err != null
           ? Center(child: Text(_err!, style: const TextStyle(color: _muted)))
           : _s == null
               ? const Center(child: CircularProgressIndicator(color: _gold))
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _bots.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (ctx, i) {
-                    final b = _bots[i];
-                    return ListTile(
-                      tileColor: _panel,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: _line)),
-                      title: Text(b.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: Text(
-                        [b.engine, b.status, b.role].where((e) => e.isNotEmpty).join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: _muted),
-                      ),
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => ChatPage(session: _s!, bot: b, machine: widget.machine)),
-                      ),
-                    );
-                  },
+              : RefreshIndicator(
+                  color: _gold,
+                  onRefresh: _load,
+                  child: _bots.isEmpty
+                      ? ListView(
+                          children: const [
+                            SizedBox(height: 120),
+                            Text(
+                              'No sessions here.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: _muted),
+                            ),
+                          ],
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _bots.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (ctx, i) {
+                            final b = _bots[i];
+                            final tile = ListTile(
+                              tileColor: _panel,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                side: const BorderSide(color: _line),
+                              ),
+                              title: Text(
+                                b.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              subtitle: Text(
+                                (b.lastText != null && b.lastText!.isNotEmpty)
+                                    ? b.lastText!
+                                    : [b.engine, b.status].where((e) => e.isNotEmpty).join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: _muted),
+                              ),
+                              trailing: widget.archived
+                                  ? TextButton(onPressed: () => _unarchive(b), child: const Text('Restore'))
+                                  : const Icon(Icons.chevron_right, color: _muted),
+                              onTap: widget.archived
+                                  ? () => _unarchive(b)
+                                  : () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => ChatPage(session: _s!, bot: b, machine: widget.machine),
+                                        ),
+                                      ).then((_) => _load()),
+                              onLongPress: widget.archived ? null : () => _rename(b),
+                            );
+                            if (widget.archived) return tile;
+                            return Dismissible(
+                              key: ValueKey(b.id),
+                              direction: DismissDirection.endToStart,
+                              confirmDismiss: (_) async {
+                                await _archive(b);
+                                return false;
+                              },
+                              background: Container(
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 20),
+                                decoration: BoxDecoration(
+                                  color: _gold.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: const Icon(Icons.inventory_2_outlined, color: _gold),
+                              ),
+                              child: tile,
+                            );
+                          },
+                        ),
                 ),
     );
   }
@@ -275,9 +444,12 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   final _c = TextEditingController();
+  final _focus = FocusNode();
   final _scroll = ScrollController();
   List<TurnInfo> _turns = [];
   String _progress = '';
+  Uint8List? _pendingImage;
+  bool _sending = false;
 
   @override
   void initState() {
@@ -286,11 +458,27 @@ class _ChatPageState extends State<ChatPage> {
       if ((body['bot_id'] as num?)?.toInt() != widget.bot.id) return;
       if (kind == 'progress') {
         setState(() => _progress = body['text'] as String? ?? '');
+        _toBottom();
       } else {
         _load();
       }
     };
     _load();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    _focus.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _toBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients) return;
+      _scroll.jumpTo(0); // reverse:true — 0 is the latest message
+    });
   }
 
   Future<void> _load() async {
@@ -308,35 +496,153 @@ class _ChatPageState extends State<ChatPage> {
       _turns = list;
       _progress = '';
     });
+    _toBottom();
+  }
+
+  Future<void> _rename() async {
+    final name = await _askName(context, title: 'Rename session', initial: widget.bot.name);
+    if (name == null || name.isEmpty || name == widget.bot.name) return;
+    try {
+      await widget.session.rpc('rename', {'bot_id': widget.bot.id, 'name': name});
+      setState(() => widget.bot.name = name);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _pick(ImageSource source) async {
+    final picker = ImagePicker();
+    var file = await picker.pickImage(
+      source: source,
+      maxWidth: 1280,
+      maxHeight: 1280,
+      imageQuality: 70,
+    );
+    if (file == null) return;
+    var bytes = await file.readAsBytes();
+    if (bytes.length > _maxImageBytes) {
+      file = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 45,
+      );
+      if (file == null) return;
+      bytes = await file.readAsBytes();
+    }
+    if (bytes.length > _maxImageBytes) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Image is too large (max ~350 KB)')));
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _pendingImage = bytes);
+  }
+
+  Future<void> _attach() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _panel,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: _gold),
+              title: const Text('Photo library'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pick(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined, color: _gold),
+              title: const Text('Camera'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pick(ImageSource.camera);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _send() async {
     final t = _c.text.trim();
-    if (t.isEmpty) return;
+    final img = _pendingImage;
+    if (t.isEmpty && img == null) return;
+    if (_sending) return;
+    _focus.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _sending = true;
+      _pendingImage = null;
+    });
     _c.clear();
-    await widget.session.rpc('send', {'bot_id': widget.bot.id, 'text': t});
-    await _load();
+    try {
+      await widget.session.rpc(
+        'send',
+        {
+          'bot_id': widget.bot.id,
+          if (t.isNotEmpty) 'text': t,
+          if (img != null)
+            'image': {
+              'mime': 'image/jpeg',
+              'name': 'photo.jpg',
+              'data': base64Encode(img),
+            },
+        },
+        const Duration(seconds: 40),
+      );
+      await _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.bot.name)),
+      appBar: AppBar(
+        title: GestureDetector(
+          onTap: _rename,
+          child: Text(
+            widget.bot.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700),
+          ),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Rename session',
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: _rename,
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(
             child: ListView.builder(
               controller: _scroll,
+              reverse: true,
               padding: const EdgeInsets.all(16),
               itemCount: _turns.length + (_progress.isEmpty ? 0 : 1),
               itemBuilder: (ctx, i) {
-                if (i == _turns.length) {
+                final extra = _progress.isEmpty ? 0 : 1;
+                if (extra == 1 && i == 0) {
                   return Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: Text(_progress, style: const TextStyle(color: _gold, fontSize: 13)),
                   );
                 }
-                final t = _turns[i];
+                final t = _turns[_turns.length - 1 - (i - extra)];
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 14),
                   child: Column(
@@ -347,7 +653,10 @@ class _ChatPageState extends State<ChatPage> {
                           alignment: Alignment.centerRight,
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            decoration: BoxDecoration(color: _gold.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(14)),
+                            decoration: BoxDecoration(
+                              color: _gold.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                             child: Text(t.input),
                           ),
                         ),
@@ -366,28 +675,72 @@ class _ChatPageState extends State<ChatPage> {
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
+              child: Column(
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _c,
-                      minLines: 1,
-                      maxLines: 5,
-                      decoration: InputDecoration(
-                        hintText: 'Message ${widget.bot.name}',
-                        filled: true,
-                        fillColor: _panel,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: _line)),
+                  if (_pendingImage != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8, bottom: 8),
+                        child: Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.memory(_pendingImage!, height: 72, fit: BoxFit.cover),
+                            ),
+                            Positioned(
+                              top: 0,
+                              right: 0,
+                              child: IconButton.filled(
+                                style: IconButton.styleFrom(
+                                  backgroundColor: _ink,
+                                  foregroundColor: _text,
+                                  padding: const EdgeInsets.all(4),
+                                  minimumSize: const Size(28, 28),
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                onPressed: () => setState(() => _pendingImage = null),
+                                icon: const Icon(Icons.close, size: 14),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      onSubmitted: (_) => _send(),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    style: IconButton.styleFrom(backgroundColor: _gold, foregroundColor: _ink),
-                    onPressed: _send,
-                    icon: const Icon(Icons.arrow_upward),
+                  Row(
+                    children: [
+                      IconButton(
+                        onPressed: _sending ? null : _attach,
+                        icon: const Icon(Icons.add_photo_alternate_outlined, color: _gold),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _c,
+                          focusNode: _focus,
+                          minLines: 1,
+                          maxLines: 5,
+                          textInputAction: TextInputAction.send,
+                          decoration: InputDecoration(
+                            hintText: 'Message',
+                            hintStyle: const TextStyle(color: _muted),
+                            filled: true,
+                            fillColor: _panel,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(18),
+                              borderSide: const BorderSide(color: _line),
+                            ),
+                          ),
+                          onSubmitted: (_) => _send(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        style: IconButton.styleFrom(backgroundColor: _gold, foregroundColor: _ink),
+                        onPressed: _sending ? null : _send,
+                        icon: const Icon(Icons.arrow_upward),
+                      ),
+                    ],
                   ),
                 ],
               ),
