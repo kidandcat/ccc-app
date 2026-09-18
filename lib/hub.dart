@@ -139,10 +139,11 @@ class BotInfo {
   final bool archived;
   final QuestionInfo? question;
 
-  /// 0 is General. Null means the listen binary did not send topic_id.
+  /// 0 is Chief. Null means the listen binary did not send topic_id.
   final int? topicId;
 
-  /// True when listen marked this row as General. Null = field absent.
+  /// True when listen marked this row as the dispatcher. Null = field absent.
+  /// Wire field is still `general` (historical).
   final bool? generalFlag;
 
   /// Dispatcher session. Prefer the hub flag; fall back to topic_id 0, then name.
@@ -150,7 +151,8 @@ class BotInfo {
     if (generalFlag == true) return true;
     if (topicId == 0) return true;
     if (generalFlag == null && topicId == null) {
-      return name.toLowerCase() == 'general';
+      final n = name.toLowerCase();
+      return n == 'chief' || n == 'general';
     }
     return false;
   }
@@ -236,7 +238,7 @@ class TurnDisplay {
       }
       return TurnDisplay(
         owner: false,
-        caption: parsed.sender ?? 'General',
+        caption: parsed.sender ?? 'Chief',
         quote: parsed.sender != null ? parsed.body : t.input,
         output: t.output,
       );

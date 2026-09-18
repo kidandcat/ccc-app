@@ -1,7 +1,7 @@
 name: ccc_app
-description: ccc — talk to General from the phone. Sessions are backend workers.
+description: ccc — talk to Chief from the phone. Sessions are backend workers.
 publish_to: "none"
-version: 0.1.8+10
+version: 0.1.9+11
 
 environment:
   sdk: ^3.13.1
