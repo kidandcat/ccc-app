@@ -298,7 +298,7 @@ class _MachinesPageState extends State<MachinesPage> {
   }
 }
 
-/// Machine home is Chief — the dispatcher — matching the Telegram DM.
+/// Machine home is General — the dispatcher — matching the Telegram DM.
 class MachineHome extends StatefulWidget {
   const MachineHome({super.key, required this.machine});
   final Machine machine;
@@ -337,7 +337,9 @@ class _MachineHomeState extends State<MachineHome> {
       if (!mounted) return;
       setState(() {
         _general = generalOf(bots);
-        _err = _general == null ? 'Chief is not up on this machine yet.' : null;
+        _err = _general == null
+            ? 'General is not up on this machine yet.'
+            : null;
       });
     } catch (e) {
       if (mounted) setState(() => _err = '$e');
@@ -618,7 +620,7 @@ class _BotsPageState extends State<BotsPage> {
                             children: [
                               const SizedBox(height: 120),
                               Text(
-                                widget.archived ? 'Nothing archived.' : 'When Chief opens a worker, it shows up here.',
+                                widget.archived ? 'Nothing archived.' : 'When General opens a worker, it shows up here.',
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(color: _muted),
                               ),
@@ -1070,7 +1072,7 @@ class _ChatPageState extends State<ChatPage> {
         title: GestureDetector(
           onTap: general ? null : _rename,
           child: Text(
-            general ? 'Chief' : widget.bot.name,
+            general ? 'General' : widget.bot.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700),
@@ -1288,7 +1290,7 @@ class _ChatPageState extends State<ChatPage> {
                           textInputAction: TextInputAction.send,
                           decoration: InputDecoration(
                             hintText: widget.bot.isGeneral
-                                ? 'Message Chief'
+                                ? 'Message General'
                                 : 'Tell this session',
                             hintStyle: const TextStyle(color: _muted),
                             filled: true,

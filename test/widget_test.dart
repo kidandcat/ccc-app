@@ -355,10 +355,10 @@ void main() {
     expect(crew.pendingDecisions, isEmpty);
   });
 
-  test('marks the dispatcher from hub flag, topic_id, or name fallback', () {
+  test('marks General from hub flag, topic_id, or name fallback', () {
     final flagged = BotInfo.fromJson({
       'id': 1,
-      'name': 'Chief',
+      'name': 'General',
       'role': '',
       'status': 'idle',
       'engine': 'grok',
@@ -379,21 +379,13 @@ void main() {
     expect(worker.isGeneral, isFalse);
     final oldListen = BotInfo.fromJson({
       'id': 3,
-      'name': 'Chief',
+      'name': 'General',
       'role': '',
       'status': 'idle',
       'engine': 'grok',
     });
     expect(oldListen.isGeneral, isTrue);
     expect(oldListen.topicId, isNull);
-    final legacyName = BotInfo.fromJson({
-      'id': 5,
-      'name': 'General',
-      'role': '',
-      'status': 'idle',
-      'engine': 'grok',
-    });
-    expect(legacyName.isGeneral, isTrue);
     final namedWorker = BotInfo.fromJson({
       'id': 4,
       'name': 'landing',

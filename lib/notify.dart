@@ -12,7 +12,7 @@ bool shouldNotify({
   bool foreground = true,
   bool general = false,
 }) {
-  // Worker transcripts are a log, not a ping. Chief replies, send_file, and
+  // Worker transcripts are a log, not a ping. General replies, send_file, and
   // ask_owner match what Telegram would notify.
   if (kind == 'post' && !general) return false;
   if (kind != 'post' && kind != 'file' && kind != 'question') return false;
