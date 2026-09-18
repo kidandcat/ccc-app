@@ -176,6 +176,33 @@ class BotInfo {
       generalFlag: j.containsKey('general') ? j['general'] as bool? : null,
     );
   }
+
+  BotInfo copyWith({
+    String? name,
+    String? status,
+    String? last,
+    String? lastText,
+    String? progress,
+    bool clearProgress = false,
+    bool? archived,
+    QuestionInfo? question,
+    bool clearQuestion = false,
+  }) {
+    return BotInfo(
+      id: id,
+      name: name ?? this.name,
+      role: role,
+      status: status ?? this.status,
+      engine: engine,
+      last: last ?? this.last,
+      lastText: lastText ?? this.lastText,
+      progress: clearProgress ? null : (progress ?? this.progress),
+      archived: archived ?? this.archived,
+      question: clearQuestion ? null : (question ?? this.question),
+      topicId: topicId,
+      generalFlag: generalFlag,
+    );
+  }
 }
 
 BotInfo? generalOf(List<BotInfo> bots) {
@@ -254,6 +281,7 @@ String statusLabel(String status) {
   switch (status) {
     case 'running':
     case 'waiting':
+    case 'queued':
     case 'idle':
       return status;
     case 'disabled':
@@ -261,6 +289,11 @@ String statusLabel(String status) {
     default:
       return status.trim().isEmpty ? 'idle' : status;
   }
+}
+
+bool statusHot(String status) {
+  final s = statusLabel(status);
+  return s == 'running' || s == 'waiting' || s == 'queued';
 }
 
 String statusCaption(String status) {

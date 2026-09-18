@@ -11,7 +11,7 @@ Pairing is TOFU. `ccc pair` prints a URI whose query carries the instance public
 - Machine list (several ccc instances: Mac, VPS, …)
 - Pair a machine (paste URI from `ccc pair`)
 - Machine home is **General** (the dispatcher). Same hub as the Telegram DM. General cannot be renamed or archived.
-- Sessions roster (from General): backend workers with live status (running / waiting / idle). They drop off the list when archived (hub `session`/`archive` events, 4s poll of `bots`, and a client-side `archived` filter). Opening a worker shows its log; sending there is `tell_session`. Chat pops if that worker is gone.
+- Sessions roster (from General): backend workers as live status cards (running / waiting / idle), same glance as Grok Bot cloud agents — name, status pill, current thinking or last line. They also sit as a sticky strip on General. They drop off when archived (hub `session`/`archive` events, 4s poll of `bots`, and a client-side `archived` filter). Opening a worker shows its log; sending there is `tell_session`. Chat pops if that worker is gone.
 - Rename a worker (tap the title). Not General.
 - Archive a worker (swipe, no confirm); restore from Archived
 - Decisions inbox: unanswered `ask_owner` questions stay in a banner / Decisions screen / sticky card above chat (Telegram-style option buttons). Answering there is hub `answer` (same as tapping the Telegram button). They cannot scroll away in the thread.

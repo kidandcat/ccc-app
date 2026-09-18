@@ -5,8 +5,11 @@ import 'package:ccc_app/decisions.dart';
 import 'package:ccc_app/hub.dart';
 import 'package:ccc_app/md.dart';
 import 'package:ccc_app/notify.dart';
+import 'package:ccc_app/sessions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+void _noopOpen(BotInfo _) {}
 
 void main() {
   test('parses ccc pair URI', () {
@@ -333,6 +336,147 @@ void main() {
     expect(find.text('Idle'), findsOneWidget);
   });
 
+  test('session subtitle prefers question, then live progress', () {
+    final running = BotInfo(
+      id: 2,
+      name: 'deploy-watch',
+      role: '',
+      status: 'running',
+      engine: 'grok',
+      progress: 'reading hub.go · 8s',
+      lastText: 'old line',
+    );
+    expect(sessionSubtitle(running), 'reading hub.go · 8s');
+    expect(
+      sessionSubtitle(running, cachedProgress: 'call grep · 3s'),
+      'call grep · 3s',
+    );
+    expect(
+      sessionSubtitle(
+        running,
+        question: QuestionInfo(
+          id: 1,
+          botId: 2,
+          bot: 'deploy-watch',
+          question: 'Ship to prod?',
+        ),
+      ),
+      'Ship to prod?',
+    );
+    final idle = BotInfo(
+      id: 3,
+      name: 'landing',
+      role: '',
+      status: 'idle',
+      engine: 'grok',
+      lastText: 'replica is caught up',
+    );
+    expect(sessionSubtitle(idle), 'replica is caught up');
+    expect(statusHot('queued'), isTrue);
+    expect(statusHot('idle'), isFalse);
+  });
+
+  test('rankWorkers puts waiting and running ahead of idle', () {
+    final idle = BotInfo(
+      id: 1,
+      name: 'old',
+      role: '',
+      status: 'idle',
+      engine: 'grok',
+      last: '2026-09-18T12:00:00Z',
+    );
+    final run = BotInfo(
+      id: 2,
+      name: 'build',
+      role: '',
+      status: 'running',
+      engine: 'grok',
+      last: '2026-09-18T11:00:00Z',
+    );
+    final wait = BotInfo(
+      id: 3,
+      name: 'deploy',
+      role: '',
+      status: 'idle',
+      engine: 'grok',
+      last: '2026-09-18T10:00:00Z',
+    );
+    final ranked = rankWorkers([idle, run, wait], isAsking: (b) => b.id == 3);
+    expect(ranked.map((b) => b.id), [3, 2, 1]);
+  });
+
+  test('sessionWhen formats recent timestamps', () {
+    final now = DateTime.utc(2026, 9, 18, 18, 0, 0);
+    expect(sessionWhen('2026-09-18T17:59:30Z', now: now), 'just now');
+    expect(sessionWhen('2026-09-18T17:50:00Z', now: now), '10m ago');
+    expect(sessionWhen('2026-09-18T15:00:00Z', now: now), '3h ago');
+  });
+
+  testWidgets('session card shows name, status pill and live line', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SessionCard(
+            bot: BotInfo(
+              id: 2,
+              name: 'CCC session cards',
+              role: '',
+              status: 'running',
+              engine: 'grok',
+              progress: 'reading main.dart · 8s',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('CCC session cards'), findsOneWidget);
+    expect(find.text('Running'), findsOneWidget);
+    expect(find.text('reading main.dart · 8s'), findsOneWidget);
+    expect(find.textContaining('grok'), findsOneWidget);
+  });
+
+  testWidgets('session strip hides when empty and caps with see-all', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SessionStrip(workers: [], onOpen: _noopOpen),
+        ),
+      ),
+    );
+    expect(find.byType(SessionCard), findsNothing);
+    expect(find.text('Sessions'), findsNothing);
+
+    final workers = [
+      for (var i = 1; i <= 5; i++)
+        BotInfo(
+          id: i,
+          name: 's$i',
+          role: '',
+          status: i == 1 ? 'waiting' : 'idle',
+          engine: 'grok',
+        ),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SessionStrip(workers: workers, onOpen: (_) {}, onSeeAll: () {}),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Sessions'), findsOneWidget);
+    expect(find.text('s1'), findsOneWidget);
+    expect(find.text('s4'), findsOneWidget);
+    expect(find.text('s5'), findsNothing);
+    expect(find.text('1 more'), findsOneWidget);
+    expect(find.text('Waiting'), findsOneWidget);
+  });
+
   test('pendingDecisions lists live ask_owner questions', () {
     final crew = Crew(HubIdentity(Uint8List(32), Uint8List(32)));
     addTearDown(crew.dispose);
@@ -353,6 +497,36 @@ void main() {
     expect(crew.questionFor('mac', 9), isNull);
     crew.questions[mac.id] = [];
     expect(crew.pendingDecisions, isEmpty);
+
+    crew.bots[mac.id] = [
+      BotInfo(
+        id: 1,
+        name: 'General',
+        role: '',
+        status: 'idle',
+        engine: 'grok',
+        generalFlag: true,
+        topicId: 0,
+      ),
+      BotInfo(
+        id: 3,
+        name: 'Deploy',
+        role: '',
+        status: 'running',
+        engine: 'grok',
+        progress: 'working',
+      ),
+    ];
+    expect(crew.workersOn('mac').map((b) => b.id), [3]);
+    final patched = crew
+        .workersOn('mac')
+        .first
+        .copyWith(status: 'idle', clearProgress: true);
+    expect(patched.status, 'idle');
+    expect(patched.progress, isNull);
+    crew.dropBot('mac', 3);
+    expect(crew.workersOn('mac'), isEmpty);
+    expect(crew.botsOn('mac').single.isGeneral, isTrue);
   });
 
   test('marks General from hub flag, topic_id, or name fallback', () {

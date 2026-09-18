@@ -34,6 +34,7 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
   final _sessions = <String, HubSession>{};
   final _progress = <String, String>{};
   final questions = <String, List<QuestionInfo>>{};
+  final bots = <String, List<BotInfo>>{};
   ({String machine, int bot})? watching;
   AppLifecycleState life = AppLifecycleState.resumed;
   void Function(Machine machine, HubSession session, BotInfo bot)? openChat;
@@ -107,6 +108,13 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
     return null;
   }
 
+  List<BotInfo> botsOn(String machineId) => bots[machineId] ?? const [];
+
+  List<BotInfo> workersOn(String machineId) => [
+    for (final b in botsOn(machineId))
+      if (!b.isGeneral && !b.archived) b,
+  ];
+
   Future<void> load() async {
     machines = await Store.load();
     for (final m in machines) {
@@ -114,10 +122,12 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
     }
     await _syncListen();
     await refreshQuestions();
+    await refreshBots();
     _poll?.cancel();
     _poll = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!foreground) return;
       refreshQuestions();
+      refreshBots();
     });
     notifyListeners();
   }
@@ -209,6 +219,76 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
     if (changed) notifyListeners();
   }
 
+  Future<void> refreshBots([Machine? only]) async {
+    final targets = only == null ? machines : [only];
+    var changed = false;
+    for (final m in targets) {
+      try {
+        final next = botsFrom(await sessionFor(m).rpc('bots'))
+            .where((b) => !b.archived)
+            .toList();
+        final prev = bots[m.id];
+        if (prev == null || !_sameBots(prev, next)) {
+          bots[m.id] = next;
+          changed = true;
+        }
+      } catch (_) {}
+    }
+    if (changed) notifyListeners();
+  }
+
+  static bool _sameBots(List<BotInfo> a, List<BotInfo> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].name != b[i].name ||
+          a[i].status != b[i].status ||
+          a[i].progress != b[i].progress ||
+          a[i].lastText != b[i].lastText ||
+          a[i].archived != b[i].archived) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void dropBot(String machineId, int botId) {
+    final cur = bots[machineId];
+    if (cur == null) return;
+    final next = [
+      for (final b in cur)
+        if (b.id != botId) b,
+    ];
+    if (next.length == cur.length) return;
+    bots[machineId] = next;
+    notifyListeners();
+  }
+
+  bool _patchBot(
+    String machineId,
+    int botId, {
+    String? status,
+    String? progress,
+    bool clearProgress = false,
+    String? lastText,
+    String? name,
+  }) {
+    final cur = bots[machineId];
+    if (cur == null) return false;
+    final i = cur.indexWhere((b) => b.id == botId);
+    if (i < 0) return false;
+    final next = [...cur];
+    next[i] = cur[i].copyWith(
+      status: status,
+      progress: progress,
+      clearProgress: clearProgress,
+      lastText: lastText,
+      name: name,
+    );
+    bots[machineId] = next;
+    return true;
+  }
+
   static bool _sameQuestions(List<QuestionInfo> a, List<QuestionInfo> b) {
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
@@ -255,11 +335,13 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
         kind == 'question' ||
         kind == 'answered' ||
         kind == 'archive') {
-      if (kind == 'archive') {
+      if (kind == 'archive' ||
+          (kind == 'session' && body['action'] == 'archive')) {
         final botId = (body['bot_id'] as num?)?.toInt();
         if (botId != null) {
           questions[m.id] = [...questionsOn(m.id)]
             ..removeWhere((q) => q.botId == botId);
+          dropBot(m.id, botId);
           notifyListeners();
         }
       }
@@ -272,17 +354,28 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
         }
       }
       unawaited(refreshQuestions(m));
+      if (kind != 'archive') unawaited(refreshBots(m));
     }
     final botId = (body['bot_id'] as num?)?.toInt();
     if (botId == null) return;
     final text = (body['text'] as String?)?.trim() ?? '';
     if (kind == 'progress') {
       setProgress(m.id, botId, text);
+      if (!_patchBot(m.id, botId, status: 'running', progress: text)) {
+        unawaited(refreshBots(m));
+      }
       notifyListeners();
       return;
     }
     if (kind == 'post' || kind == 'file') {
       setProgress(m.id, botId, '');
+      _patchBot(
+        m.id,
+        botId,
+        clearProgress: true,
+        lastText: text.isEmpty ? null : text,
+      );
+      unawaited(refreshBots(m));
     }
     final name = (body['bot'] as String?)?.trim();
     final general =

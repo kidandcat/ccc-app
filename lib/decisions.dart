@@ -326,8 +326,7 @@ class StatusMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = statusLabel(status);
-    final color = (label == 'running' || label == 'waiting') ? _gold : _muted;
+    final color = statusHot(status) ? _gold : _muted;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [

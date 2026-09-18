@@ -11,6 +11,7 @@ import 'decisions.dart';
 import 'hub.dart';
 import 'md.dart';
 import 'notify.dart';
+import 'sessions.dart';
 
 const _ink = Color(0xFF0E1116);
 const _panel = Color(0xFF171C24);
@@ -495,6 +496,7 @@ class _BotsPageState extends State<BotsPage> {
     if (_s == null || b.isGeneral) return;
     _archiving.add(b.id);
     setState(() => _bots.removeWhere((x) => x.id == b.id));
+    CrewScope.read(context).dropBot(widget.machine.id, b.id);
     try {
       await _s!.rpc('archive', {'bot_id': b.id});
     } catch (e) {
@@ -506,6 +508,7 @@ class _BotsPageState extends State<BotsPage> {
           _bots.insert(index, b);
         }
       });
+      unawaited(CrewScope.read(context).refreshBots(widget.machine));
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     } finally {
       _archiving.remove(b.id);
@@ -517,6 +520,8 @@ class _BotsPageState extends State<BotsPage> {
     try {
       await _s!.rpc('unarchive', {'bot_id': b.id});
       await _load();
+      if (mounted)
+        unawaited(CrewScope.read(context).refreshBots(widget.machine));
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context)
@@ -639,65 +644,21 @@ class _BotsPageState extends State<BotsPage> {
                                   b.question;
                               final asking =
                                   q != null && q.question.trim().isNotEmpty;
-                              final live =
-                                  b.progress != null && b.progress!.isNotEmpty;
-                              final tile = ListTile(
-                                tileColor: _panel,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  side: BorderSide(
-                                    color: asking
-                                        ? _gold.withValues(alpha: 0.45)
-                                        : _line,
-                                  ),
-                                ),
-                                title: Text(
-                                  b.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  asking
-                                      ? q.question
-                                      : live
-                                      ? b.progress!
-                                      : (b.lastText != null &&
-                                            b.lastText!.isNotEmpty)
-                                      ? b.lastText!
-                                      : b.engine,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color:
-                                        (asking ||
-                                            live ||
-                                            b.status == 'waiting' ||
-                                            b.status == 'running')
-                                        ? _gold
-                                        : _muted,
-                                  ),
+                              final tile = SessionCard(
+                                bot: b,
+                                asking: asking,
+                                line: sessionSubtitle(
+                                  b,
+                                  question: q,
+                                  cachedProgress: CrewScope.of(context)
+                                      .progressFor(widget.machine.id, b.id),
                                 ),
                                 trailing: widget.archived
                                     ? TextButton(
                                         onPressed: () => _unarchive(b),
                                         child: const Text('Restore'),
                                       )
-                                    : Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          StatusMark(
-                                            asking ? 'waiting' : b.status,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          const Icon(
-                                            Icons.chevron_right,
-                                            color: _muted,
-                                          ),
-                                        ],
-                                      ),
+                                    : null,
                                 onTap: widget.archived
                                     ? () => _unarchive(b)
                                     : () => Navigator.push(
@@ -783,6 +744,9 @@ class _ChatPageState extends State<ChatPage> {
       cached: _crew!.progressFor(widget.machine.id, widget.bot.id),
     );
     _load();
+    if (widget.bot.isGeneral) {
+      unawaited(_crew!.refreshBots(widget.machine));
+    }
   }
 
   void _onHub(String kind, Map<String, dynamic> body) {
@@ -1112,6 +1076,31 @@ class _ChatPageState extends State<ChatPage> {
                 machine: widget.machine,
                 question: pending,
                 showSession: false,
+              ),
+            ),
+          if (general)
+            SessionStrip(
+              workers: crew.workersOn(widget.machine.id),
+              questionOf: (id) => crew.questionFor(widget.machine.id, id),
+              progressOf: (id) => crew.progressFor(widget.machine.id, id),
+              onOpen: (b) => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => ChatPage(
+                    session: widget.session,
+                    bot: b,
+                    machine: widget.machine,
+                  ),
+                ),
+              ),
+              onSeeAll: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => BotsPage(
+                    machine: widget.machine,
+                    session: widget.session,
+                  ),
+                ),
               ),
             ),
           Expanded(
