@@ -17,7 +17,10 @@ class MdBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final base = (style ?? theme.textTheme.bodyMedium)?.copyWith(color: _text, height: 1.45);
+    final base = (style ?? theme.textTheme.bodyMedium)?.copyWith(
+      color: _text,
+      height: 1.45,
+    );
     return MarkdownBody(
       data: data,
       selectable: true,
@@ -31,12 +34,28 @@ class MdBody extends StatelessWidget {
         del: base?.copyWith(decoration: TextDecoration.lineThrough),
         listBullet: base,
         listIndent: 22,
-        h1: base?.copyWith(fontSize: 22, fontWeight: FontWeight.w700, height: 1.3),
-        h2: base?.copyWith(fontSize: 18, fontWeight: FontWeight.w700, height: 1.3),
-        h3: base?.copyWith(fontSize: 16, fontWeight: FontWeight.w700, height: 1.3),
+        h1: base?.copyWith(
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          height: 1.3,
+        ),
+        h2: base?.copyWith(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          height: 1.3,
+        ),
+        h3: base?.copyWith(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          height: 1.3,
+        ),
         h4: base?.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
         h5: base?.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
-        h6: base?.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: _muted),
+        h6: base?.copyWith(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: _muted,
+        ),
         blockquote: base?.copyWith(color: _muted),
         blockquoteDecoration: const BoxDecoration(
           color: _panel,
@@ -62,7 +81,10 @@ class MdBody extends StatelessWidget {
         tableBorder: TableBorder.all(color: _line, width: 0.6),
         tableColumnWidth: const IntrinsicColumnWidth(),
         tableScrollbarThumbVisibility: true,
-        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        tableCellsPadding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 7,
+        ),
         tableHeadCellsDecoration: const BoxDecoration(color: Color(0xFF1E2530)),
         tablePadding: const EdgeInsets.only(bottom: 8, top: 4),
         horizontalRuleDecoration: const BoxDecoration(

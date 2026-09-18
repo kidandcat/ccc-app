@@ -59,6 +59,8 @@ void main() {
     expect(b.question?.id, 4);
     expect(statusLabel('waiting'), 'waiting');
     expect(statusLabel('disabled'), 'idle');
+    expect(statusCaption('waiting'), 'Waiting');
+    expect(statusCaption('running'), 'Running');
   });
 
   test('parses pending ask_owner on a bot and the questions list', () {

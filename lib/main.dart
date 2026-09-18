@@ -526,11 +526,23 @@ class _BotsPageState extends State<BotsPage> {
                                 const SizedBox(height: 8),
                             itemBuilder: (ctx, i) {
                               final b = _bots[i];
+                              final q =
+                                  CrewScope.of(context)
+                                      .questionFor(widget.machine.id, b.id) ??
+                                  b.question;
+                              final asking =
+                                  q != null && q.question.trim().isNotEmpty;
+                              final live =
+                                  b.progress != null && b.progress!.isNotEmpty;
                               final tile = ListTile(
                                 tileColor: _panel,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
-                                  side: const BorderSide(color: _line),
+                                  side: BorderSide(
+                                    color: asking
+                                        ? _gold.withValues(alpha: 0.45)
+                                        : _line,
+                                  ),
                                 ),
                                 title: Text(
                                   b.name,
@@ -541,11 +553,9 @@ class _BotsPageState extends State<BotsPage> {
                                   ),
                                 ),
                                 subtitle: Text(
-                                  (b.question != null &&
-                                          b.question!.question.isNotEmpty)
-                                      ? b.question!.question
-                                      : (b.progress != null &&
-                                            b.progress!.isNotEmpty)
+                                  asking
+                                      ? q.question
+                                      : live
                                       ? b.progress!
                                       : (b.lastText != null &&
                                             b.lastText!.isNotEmpty)
@@ -555,10 +565,10 @@ class _BotsPageState extends State<BotsPage> {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     color:
-                                        (b.status == 'waiting' ||
-                                            b.status == 'running' ||
-                                            (b.progress != null &&
-                                                b.progress!.isNotEmpty))
+                                        (asking ||
+                                            live ||
+                                            b.status == 'waiting' ||
+                                            b.status == 'running')
                                         ? _gold
                                         : _muted,
                                   ),
@@ -571,7 +581,9 @@ class _BotsPageState extends State<BotsPage> {
                                     : Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          StatusMark(b.status),
+                                          StatusMark(
+                                            asking ? 'waiting' : b.status,
+                                          ),
                                           const SizedBox(width: 8),
                                           const Icon(
                                             Icons.chevron_right,
@@ -675,6 +687,13 @@ class _ChatPageState extends State<ChatPage> {
         kind == 'archive') {
       setState(() {});
     }
+    if (kind == 'archive' && id == widget.bot.id) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+    if (kind == 'session') {
+      unawaited(_ensureStillLive());
+    }
     if (id != null && id != widget.bot.id) return;
     if (id == null && kind != 'progress' && kind != 'post' && kind != 'file')
       return;
@@ -699,6 +718,16 @@ class _ChatPageState extends State<ChatPage> {
     _focus.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<void> _ensureStillLive() async {
+    try {
+      final bots = botsFrom(await widget.session.rpc('bots'));
+      if (!mounted) return;
+      if (!bots.any((b) => b.id == widget.bot.id)) {
+        Navigator.of(context).maybePop();
+      }
+    } catch (_) {}
   }
 
   void _toBottom() {
@@ -927,8 +956,8 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    final pending = CrewScope.of(context)
-        .questionFor(widget.machine.id, widget.bot.id);
+    final crew = CrewScope.of(context);
+    final pending = crew.questionFor(widget.machine.id, widget.bot.id);
     return Scaffold(
       appBar: AppBar(
         title: GestureDetector(
@@ -960,11 +989,6 @@ class _ChatPageState extends State<ChatPage> {
                 question: pending,
                 showSession: false,
               ),
-            )
-          else if (others > 0)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: DecisionBanner(machine: null),
             ),
           Expanded(
             child: ListView.builder(
