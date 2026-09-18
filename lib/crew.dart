@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
@@ -6,7 +7,8 @@ import 'hub.dart';
 import 'notify.dart';
 
 class CrewScope extends InheritedNotifier<Crew> {
-  const CrewScope({super.key, required Crew crew, required super.child}) : super(notifier: crew);
+  const CrewScope({super.key, required Crew crew, required super.child})
+    : super(notifier: crew);
 
   static Crew of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<CrewScope>();
@@ -31,15 +33,19 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
   List<Machine> machines = [];
   final _sessions = <String, HubSession>{};
   final _progress = <String, String>{};
+  final questions = <String, List<QuestionInfo>>{};
   ({String machine, int bot})? watching;
   AppLifecycleState life = AppLifecycleState.resumed;
   void Function(Machine machine, HubSession session, BotInfo bot)? openChat;
+  void Function(Machine machine)? openDecisions;
+  Timer? _poll;
 
   bool get foreground => life == AppLifecycleState.resumed;
 
   static String progressKey(String machineId, int botId) => '$machineId:$botId';
 
-  String progressFor(String machineId, int botId) => _progress[progressKey(machineId, botId)] ?? '';
+  String progressFor(String machineId, int botId) =>
+      _progress[progressKey(machineId, botId)] ?? '';
 
   void setProgress(String machineId, int botId, String text) {
     final k = progressKey(machineId, botId);
@@ -77,7 +83,28 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
       for (final s in _sessions.values) {
         s.wake();
       }
+      refreshQuestions();
     }
+  }
+
+  List<QuestionInfo> questionsOn(String machineId) =>
+      questions[machineId] ?? const [];
+
+  List<({Machine machine, QuestionInfo question})> get pendingDecisions {
+    final out = <({Machine machine, QuestionInfo question})>[];
+    for (final m in machines) {
+      for (final q in questionsOn(m.id)) {
+        out.add((machine: m, question: q));
+      }
+    }
+    return out;
+  }
+
+  QuestionInfo? questionFor(String machineId, int botId) {
+    for (final q in questionsOn(machineId)) {
+      if (q.botId == botId) return q;
+    }
+    return null;
   }
 
   Future<void> load() async {
@@ -86,6 +113,11 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
       sessionFor(m);
     }
     await _syncListen();
+    await refreshQuestions();
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(seconds: 4), (_) {
+      refreshQuestions();
+    });
     notifyListeners();
   }
 
@@ -121,6 +153,7 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
       sessionFor(m);
     }
     await _syncListen();
+    await refreshQuestions();
     notifyListeners();
   }
 
@@ -135,12 +168,109 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
     await save(next);
   }
 
+  Future<void> refreshQuestions([Machine? only]) async {
+    final targets = only == null ? machines : [only];
+    var changed = false;
+    for (final m in targets) {
+      try {
+        final res = await sessionFor(m).rpc('questions');
+        final next = questionsFrom(res);
+        final prev = questions[m.id];
+        if (prev == null ||
+            prev.length != next.length ||
+            !_sameQuestions(prev, next)) {
+          questions[m.id] = next;
+          changed = true;
+        }
+      } catch (_) {
+        // Old listen binaries have no questions RPC; fall back to bots.question.
+        try {
+          final bots = botsFrom(await sessionFor(m).rpc('bots'));
+          final next = [
+            for (final b in bots)
+              if (b.question != null) b.question!,
+          ];
+          final prev = questions[m.id];
+          if (prev == null || !_sameQuestions(prev, next)) {
+            questions[m.id] = next;
+            changed = true;
+          }
+        } catch (_) {}
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
+  static bool _sameQuestions(List<QuestionInfo> a, List<QuestionInfo> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id || a[i].question != b[i].question) return false;
+    }
+    return true;
+  }
+
+  Future<void> answerQuestion(
+    Machine m,
+    QuestionInfo q, {
+    int? option,
+    String? text,
+  }) async {
+    final params = <String, dynamic>{'question_id': q.id};
+    if (option != null) params['option'] = option;
+    final typed = text?.trim() ?? '';
+    if (typed.isNotEmpty) params['text'] = typed;
+    try {
+      await sessionFor(m).rpc('answer', params);
+    } catch (e) {
+      final msg = '$e';
+      if (!msg.contains('unknown method')) rethrow;
+      final answer = typed.isNotEmpty
+          ? typed
+          : (option != null && option >= 0 && option < q.options.length
+                ? q.options[option]
+                : '');
+      if (answer.isEmpty) rethrow;
+      await sessionFor(m).rpc('send', {
+        'bot_id': q.botId,
+        'text': answer,
+      }, const Duration(seconds: 40));
+    }
+    final cur = [...questionsOn(m.id)]..removeWhere((e) => e.id == q.id);
+    questions[m.id] = cur;
+    notifyListeners();
+    await refreshQuestions(m);
+  }
+
   void _onEvent(Machine m, String kind, Map<String, dynamic> body) {
+    if (kind == 'up' ||
+        kind == 'session' ||
+        kind == 'question' ||
+        kind == 'answered' ||
+        kind == 'archive') {
+      if (kind == 'archive') {
+        final botId = (body['bot_id'] as num?)?.toInt();
+        if (botId != null) {
+          questions[m.id] = [...questionsOn(m.id)]
+            ..removeWhere((q) => q.botId == botId);
+          notifyListeners();
+        }
+      }
+      if (kind == 'answered') {
+        final qid = (body['id'] as num?)?.toInt();
+        if (qid != null) {
+          questions[m.id] = [...questionsOn(m.id)]
+            ..removeWhere((q) => q.id == qid);
+          notifyListeners();
+        }
+      }
+      unawaited(refreshQuestions(m));
+    }
     final botId = (body['bot_id'] as num?)?.toInt();
     if (botId == null) return;
     final text = (body['text'] as String?)?.trim() ?? '';
     if (kind == 'progress') {
       setProgress(m.id, botId, text);
+      notifyListeners();
       return;
     }
     if (kind == 'post' || kind == 'file') {
@@ -156,10 +286,15 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     final name = (body['bot'] as String?)?.trim();
+    final title = kind == 'question'
+        ? ((name == null || name.isEmpty) ? 'Decision' : name)
+        : ((name == null || name.isEmpty) ? m.name : name);
     Notify.message(
       id: notificationId(m.id, botId),
-      title: (name == null || name.isEmpty) ? m.name : name,
-      body: text.isEmpty ? 'New message' : text,
+      title: title,
+      body: text.isEmpty
+          ? (kind == 'question' ? 'Needs a decision' : 'New message')
+          : text,
       payload: jsonEncode({'machine': m.id, 'bot_id': botId}),
     );
   }

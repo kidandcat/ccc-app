@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -6,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'crew.dart';
+import 'decisions.dart';
 import 'hub.dart';
 import 'md.dart';
 import 'notify.dart';
@@ -28,6 +30,11 @@ Future<void> main() async {
       MaterialPageRoute<void>(
         builder: (_) => ChatPage(session: session, bot: bot, machine: machine),
       ),
+    );
+  };
+  crew.openDecisions = (machine) {
+    crew.navKey.currentState?.push(
+      MaterialPageRoute<void>(builder: (_) => DecisionsPage(machine: machine)),
     );
   };
   await Notify.init(
@@ -64,18 +71,24 @@ class CccApp extends StatelessWidget {
       navigatorKey: crew.navKey,
       debugShowCheckedModeBanner: false,
       theme: base.copyWith(
-        textTheme: GoogleFonts.sourceSans3TextTheme(base.textTheme).apply(
-          bodyColor: _text,
-          displayColor: _text,
+        textTheme: GoogleFonts.sourceSans3TextTheme(base.textTheme)
+            .apply(bodyColor: _text, displayColor: _text),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: _ink,
+          foregroundColor: _text,
+          elevation: 0,
         ),
-        appBarTheme: const AppBarTheme(backgroundColor: _ink, foregroundColor: _text, elevation: 0),
       ),
       home: const MachinesPage(),
     );
   }
 }
 
-Future<String?> _askName(BuildContext context, {required String title, String initial = ''}) {
+Future<String?> _askName(
+  BuildContext context, {
+  required String title,
+  String initial = '',
+}) {
   final c = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
@@ -93,8 +106,14 @@ Future<String?> _askName(BuildContext context, {required String title, String in
         onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        TextButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Save')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, c.text.trim()),
+          child: const Text('Save'),
+        ),
       ],
     ),
   );
@@ -124,8 +143,14 @@ class _MachinesPageState extends State<MachinesPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Pair')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, c.text),
+              child: const Text('Pair'),
+            ),
           ],
         );
       },
@@ -133,12 +158,19 @@ class _MachinesPageState extends State<MachinesPage> {
     if (uri == null || uri.trim().isEmpty || !mounted) return;
     final p = Pairing.parse(uri);
     if (p == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('That is not a ccc pairing URI')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That is not a ccc pairing URI')),
+      );
       return;
     }
     try {
       final id = await HubSession.loadIdentity();
-      final m = Machine(hub: p.hub, id: p.instanceId, pk: p.instancePk, name: 'pairing…');
+      final m = Machine(
+        hub: p.hub,
+        id: p.instanceId,
+        pk: p.instancePk,
+        name: 'pairing…',
+      );
       final s = HubSession(id, m);
       await s.connect();
       final res = await s.pair(p);
@@ -157,7 +189,8 @@ class _MachinesPageState extends State<MachinesPage> {
       await CrewScope.of(context).pair(m);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pair failed: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Pair failed: $e')));
       }
     }
   }
@@ -168,7 +201,27 @@ class _MachinesPageState extends State<MachinesPage> {
     final ms = crew.machines;
     return Scaffold(
       appBar: AppBar(
-        title: Text('CCC', style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700, letterSpacing: 0.08)),
+        title: Text(
+          'CCC',
+          style: GoogleFonts.sourceSerif4(
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.08,
+          ),
+        ),
+        actions: [
+          if (crew.pendingDecisions.isNotEmpty)
+            IconButton(
+              tooltip: 'Decisions',
+              icon: Badge(
+                label: Text('${crew.pendingDecisions.length}'),
+                child: const Icon(Icons.front_hand_outlined),
+              ),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const DecisionsPage()),
+              ),
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: _gold,
@@ -188,29 +241,67 @@ class _MachinesPageState extends State<MachinesPage> {
                 ),
               ),
             )
-          : ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-              itemCount: ms.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (ctx, i) {
-                final m = ms[i];
-                return ListTile(
-                  tileColor: _panel,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: _line)),
-                  title: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text(m.id.substring(0, 12), style: const TextStyle(color: _muted, fontFamily: 'monospace')),
-                  trailing: const Icon(Icons.chevron_right, color: _muted),
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BotsPage(machine: m))),
-                  onLongPress: () => crew.removeAt(i),
-                );
-              },
+          : Column(
+              children: [
+                if (crew.pendingDecisions.isNotEmpty)
+                  const DecisionBanner(machine: null),
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                    itemCount: ms.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (ctx, i) {
+                      final m = ms[i];
+                      final waiting = crew.questionsOn(m.id).length;
+                      return ListTile(
+                        tileColor: _panel,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: const BorderSide(color: _line),
+                        ),
+                        title: Text(
+                          m.name,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          waiting == 0
+                              ? m.id.substring(0, 12)
+                              : (waiting == 1
+                                    ? '1 decision waiting'
+                                    : '$waiting decisions waiting'),
+                          style: TextStyle(
+                            color: waiting == 0 ? _muted : _gold,
+                            fontFamily: waiting == 0 ? 'monospace' : null,
+                          ),
+                        ),
+                        trailing: const Icon(
+                          Icons.chevron_right,
+                          color: _muted,
+                        ),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => BotsPage(machine: m),
+                          ),
+                        ),
+                        onLongPress: () => crew.removeAt(i),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
     );
   }
 }
 
 class BotsPage extends StatefulWidget {
-  const BotsPage({super.key, required this.machine, this.session, this.archived = false});
+  const BotsPage({
+    super.key,
+    required this.machine,
+    this.session,
+    this.archived = false,
+  });
   final Machine machine;
   final HubSession? session;
   final bool archived;
@@ -224,6 +315,7 @@ class _BotsPageState extends State<BotsPage> {
   String? _err;
   bool _booted = false;
   final _archiving = <int>{};
+  Timer? _poll;
 
   @override
   void didChangeDependencies() {
@@ -235,13 +327,29 @@ class _BotsPageState extends State<BotsPage> {
 
   @override
   void dispose() {
+    _poll?.cancel();
     _s?.removeListener(_onHub);
     super.dispose();
   }
 
   void _onHub(String kind, Map<String, dynamic> body) {
-    if (kind != 'progress' && kind != 'post' && kind != 'file') return;
-    _load();
+    if (kind == 'archive' ||
+        (kind == 'session' && body['action'] == 'archive')) {
+      final id = (body['bot_id'] as num?)?.toInt();
+      if (id != null) {
+        setState(() => _bots.removeWhere((b) => b.id == id));
+      }
+    }
+    if (kind == 'progress' ||
+        kind == 'post' ||
+        kind == 'file' ||
+        kind == 'session' ||
+        kind == 'question' ||
+        kind == 'answered' ||
+        kind == 'archive' ||
+        kind == 'up') {
+      _load();
+    }
   }
 
   Future<void> _boot() async {
@@ -252,6 +360,12 @@ class _BotsPageState extends State<BotsPage> {
       if (!mounted) return;
       setState(() {});
       await _load();
+      _poll?.cancel();
+      _poll = Timer.periodic(const Duration(seconds: 4), (_) {
+        if (!mounted) return;
+        _load();
+        CrewScope.read(context).refreshQuestions(widget.machine);
+      });
     } catch (e) {
       if (mounted) setState(() => _err = '$e');
     }
@@ -298,18 +412,26 @@ class _BotsPageState extends State<BotsPage> {
       await _s!.rpc('unarchive', {'bot_id': b.id});
       await _load();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
   Future<void> _rename(BotInfo b) async {
-    final name = await _askName(context, title: 'Rename session', initial: b.name);
+    final name = await _askName(
+      context,
+      title: 'Rename session',
+      initial: b.name,
+    );
     if (name == null || name.isEmpty || name == b.name || _s == null) return;
     try {
       await _s!.rpc('rename', {'bot_id': b.id, 'name': name});
       await _load();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -322,6 +444,25 @@ class _BotsPageState extends State<BotsPage> {
           style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700),
         ),
         actions: [
+          if (!widget.archived)
+            IconButton(
+              tooltip: 'Decisions',
+              icon: Badge(
+                isLabelVisible: CrewScope.of(context)
+                    .questionsOn(widget.machine.id)
+                    .isNotEmpty,
+                label: Text(
+                  '${CrewScope.of(context).questionsOn(widget.machine.id).length}',
+                ),
+                child: const Icon(Icons.front_hand_outlined),
+              ),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => DecisionsPage(machine: widget.machine),
+                ),
+              ),
+            ),
           if (!widget.archived && _s != null)
             IconButton(
               tooltip: 'Archived sessions',
@@ -330,7 +471,11 @@ class _BotsPageState extends State<BotsPage> {
                 await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => BotsPage(machine: widget.machine, session: _s, archived: true),
+                    builder: (_) => BotsPage(
+                      machine: widget.machine,
+                      session: _s,
+                      archived: true,
+                    ),
                   ),
                 );
                 _load();
@@ -339,91 +484,153 @@ class _BotsPageState extends State<BotsPage> {
         ],
       ),
       body: _err != null
-          ? Center(child: Text(_err!, style: const TextStyle(color: _muted)))
+          ? Center(
+              child: Text(_err!, style: const TextStyle(color: _muted)),
+            )
           : _s == null
-              ? const Center(child: CircularProgressIndicator(color: _gold))
-              : RefreshIndicator(
-                  color: _gold,
-                  onRefresh: _load,
-                  child: _bots.isEmpty
-                      ? ListView(
-                          children: const [
-                            SizedBox(height: 120),
-                            Text(
-                              'No sessions here.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: _muted),
-                            ),
-                          ],
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _bots.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
-                          itemBuilder: (ctx, i) {
-                            final b = _bots[i];
-                            final tile = ListTile(
-                              tileColor: _panel,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                side: const BorderSide(color: _line),
+          ? const Center(child: CircularProgressIndicator(color: _gold))
+          : Column(
+              children: [
+                if (!widget.archived)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: DecisionBanner(
+                      machine: widget.machine,
+                      questions: CrewScope.of(context)
+                          .questionsOn(widget.machine.id),
+                    ),
+                  ),
+                Expanded(
+                  child: RefreshIndicator(
+                    color: _gold,
+                    onRefresh: () async {
+                      final crew = CrewScope.read(context);
+                      await _load();
+                      await crew.refreshQuestions(widget.machine);
+                    },
+                    child: _bots.isEmpty
+                        ? ListView(
+                            children: const [
+                              SizedBox(height: 120),
+                              Text(
+                                'No sessions here.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: _muted),
                               ),
-                              title: Text(
-                                b.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w700),
-                              ),
-                              subtitle: Text(
-                                (b.progress != null && b.progress!.isNotEmpty)
-                                    ? b.progress!
-                                    : (b.lastText != null && b.lastText!.isNotEmpty)
-                                        ? b.lastText!
-                                        : [b.engine, b.status].where((e) => e.isNotEmpty).join(' · '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: (b.progress != null && b.progress!.isNotEmpty) ? _gold : _muted,
+                            ],
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                            itemCount: _bots.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (ctx, i) {
+                              final b = _bots[i];
+                              final tile = ListTile(
+                                tileColor: _panel,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  side: const BorderSide(color: _line),
                                 ),
-                              ),
-                              trailing: widget.archived
-                                  ? TextButton(onPressed: () => _unarchive(b), child: const Text('Restore'))
-                                  : const Icon(Icons.chevron_right, color: _muted),
-                              onTap: widget.archived
-                                  ? () => _unarchive(b)
-                                  : () => Navigator.push(
+                                title: Text(
+                                  b.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  (b.question != null &&
+                                          b.question!.question.isNotEmpty)
+                                      ? b.question!.question
+                                      : (b.progress != null &&
+                                            b.progress!.isNotEmpty)
+                                      ? b.progress!
+                                      : (b.lastText != null &&
+                                            b.lastText!.isNotEmpty)
+                                      ? b.lastText!
+                                      : b.engine,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color:
+                                        (b.status == 'waiting' ||
+                                            b.status == 'running' ||
+                                            (b.progress != null &&
+                                                b.progress!.isNotEmpty))
+                                        ? _gold
+                                        : _muted,
+                                  ),
+                                ),
+                                trailing: widget.archived
+                                    ? TextButton(
+                                        onPressed: () => _unarchive(b),
+                                        child: const Text('Restore'),
+                                      )
+                                    : Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          StatusMark(b.status),
+                                          const SizedBox(width: 8),
+                                          const Icon(
+                                            Icons.chevron_right,
+                                            color: _muted,
+                                          ),
+                                        ],
+                                      ),
+                                onTap: widget.archived
+                                    ? () => _unarchive(b)
+                                    : () => Navigator.push(
                                         context,
                                         MaterialPageRoute(
-                                          builder: (_) => ChatPage(session: _s!, bot: b, machine: widget.machine),
+                                          builder: (_) => ChatPage(
+                                            session: _s!,
+                                            bot: b,
+                                            machine: widget.machine,
+                                          ),
                                         ),
                                       ).then((_) => _load()),
-                              onLongPress: widget.archived ? null : () => _rename(b),
-                            );
-                            if (widget.archived) return tile;
-                            return Dismissible(
-                              key: ValueKey(b.id),
-                              direction: DismissDirection.endToStart,
-                              onDismissed: (_) => _archiveNow(b, i),
-                              background: Container(
-                                alignment: Alignment.centerRight,
-                                padding: const EdgeInsets.only(right: 20),
-                                decoration: BoxDecoration(
-                                  color: _gold.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(14),
+                                onLongPress: widget.archived
+                                    ? null
+                                    : () => _rename(b),
+                              );
+                              if (widget.archived) return tile;
+                              return Dismissible(
+                                key: ValueKey(b.id),
+                                direction: DismissDirection.endToStart,
+                                onDismissed: (_) => _archiveNow(b, i),
+                                background: Container(
+                                  alignment: Alignment.centerRight,
+                                  padding: const EdgeInsets.only(right: 20),
+                                  decoration: BoxDecoration(
+                                    color: _gold.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: const Icon(
+                                    Icons.inventory_2_outlined,
+                                    color: _gold,
+                                  ),
                                 ),
-                                child: const Icon(Icons.inventory_2_outlined, color: _gold),
-                              ),
-                              child: tile,
-                            );
-                          },
-                        ),
+                                child: tile,
+                              );
+                            },
+                          ),
+                  ),
                 ),
+              ],
+            ),
     );
   }
 }
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({super.key, required this.session, required this.bot, required this.machine});
+  const ChatPage({
+    super.key,
+    required this.session,
+    required this.bot,
+    required this.machine,
+  });
   final HubSession session;
   final BotInfo bot;
   final Machine machine;
@@ -461,7 +668,16 @@ class _ChatPageState extends State<ChatPage> {
 
   void _onHub(String kind, Map<String, dynamic> body) {
     if (!mounted) return;
-    if ((body['bot_id'] as num?)?.toInt() != widget.bot.id) return;
+    final id = (body['bot_id'] as num?)?.toInt();
+    if (kind == 'question' ||
+        kind == 'answered' ||
+        kind == 'session' ||
+        kind == 'archive') {
+      setState(() {});
+    }
+    if (id != null && id != widget.bot.id) return;
+    if (id == null && kind != 'progress' && kind != 'post' && kind != 'file')
+      return;
     if (kind == 'progress') {
       final text = body['text'] as String? ?? '';
       _crew?.setProgress(widget.machine.id, widget.bot.id, text);
@@ -494,7 +710,10 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _load() async {
     try {
-      final res = await widget.session.rpc('history', {'bot_id': widget.bot.id, 'limit': 50});
+      final res = await widget.session.rpc('history', {
+        'bot_id': widget.bot.id,
+        'limit': 50,
+      });
       final body = res['body'];
       final raw = body is String ? jsonDecode(body) : body;
       final list = <TurnInfo>[];
@@ -525,13 +744,22 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _rename() async {
-    final name = await _askName(context, title: 'Rename session', initial: widget.bot.name);
+    final name = await _askName(
+      context,
+      title: 'Rename session',
+      initial: widget.bot.name,
+    );
     if (name == null || name.isEmpty || name == widget.bot.name) return;
     try {
-      await widget.session.rpc('rename', {'bot_id': widget.bot.id, 'name': name});
+      await widget.session.rpc('rename', {
+        'bot_id': widget.bot.id,
+        'name': name,
+      });
       setState(() => widget.bot.name = name);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -557,12 +785,20 @@ class _ChatPageState extends State<ChatPage> {
     }
     if (bytes.length > _maxImageBytes) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Image is too large (max ~350 KB)')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Image is too large (max ~350 KB)')),
+        );
       }
       return;
     }
     if (!mounted) return;
-    setState(() => _pending = PendingAttach(name: 'photo.jpg', mime: 'image/jpeg', bytes: bytes));
+    setState(
+      () => _pending = PendingAttach(
+        name: 'photo.jpg',
+        mime: 'image/jpeg',
+        bytes: bytes,
+      ),
+    );
   }
 
   Future<void> _pickFile() async {
@@ -571,13 +807,21 @@ class _ChatPageState extends State<ChatPage> {
     final bytes = await f.readAsBytes();
     if (bytes.length > hubFileMaxBytes) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File is too large (max 50 MB)')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('File is too large (max 50 MB)')),
+        );
       }
       return;
     }
     if (!mounted) return;
     final name = (f.name.trim().isEmpty) ? 'file' : f.name;
-    setState(() => _pending = PendingAttach(name: name, mime: mimeForName(name), bytes: bytes));
+    setState(
+      () => _pending = PendingAttach(
+        name: name,
+        mime: mimeForName(name),
+        bytes: bytes,
+      ),
+    );
   }
 
   Future<void> _attach() async {
@@ -631,10 +875,13 @@ class _ChatPageState extends State<ChatPage> {
         bytes: bytes,
       );
       if (uri != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved ${f.name}')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Saved ${f.name}')));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
     } finally {
       if (mounted) setState(() => _fetching.remove(f.id));
     }
@@ -662,15 +909,17 @@ class _ChatPageState extends State<ChatPage> {
           text: t,
         );
       } else {
-        await widget.session.rpc(
-          'send',
-          {'bot_id': widget.bot.id, 'text': t},
-          const Duration(seconds: 40),
-        );
+        await widget.session.rpc('send', {
+          'bot_id': widget.bot.id,
+          'text': t,
+        }, const Duration(seconds: 40));
       }
       await _load();
+      await _crew?.refreshQuestions(widget.machine);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -678,6 +927,8 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final pending = CrewScope.of(context)
+        .questionFor(widget.machine.id, widget.bot.id);
     return Scaffold(
       appBar: AppBar(
         title: GestureDetector(
@@ -690,6 +941,8 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ),
         actions: [
+          StatusMark(pending != null ? 'waiting' : widget.bot.status),
+          const SizedBox(width: 8),
           IconButton(
             tooltip: 'Rename session',
             icon: const Icon(Icons.edit_outlined, size: 20),
@@ -699,6 +952,20 @@ class _ChatPageState extends State<ChatPage> {
       ),
       body: Column(
         children: [
+          if (pending != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: DecisionCard(
+                machine: widget.machine,
+                question: pending,
+                showSession: false,
+              ),
+            )
+          else if (others > 0)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: DecisionBanner(machine: null),
+            ),
           Expanded(
             child: ListView.builder(
               controller: _scroll,
@@ -710,7 +977,10 @@ class _ChatPageState extends State<ChatPage> {
                 if (extra == 1 && i == 0) {
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(_progress, style: const TextStyle(color: _gold, fontSize: 13)),
+                    child: Text(
+                      _progress,
+                      style: const TextStyle(color: _gold, fontSize: 13),
+                    ),
                   );
                 }
                 final t = _turns[_turns.length - 1 - (i - extra)];
@@ -723,9 +993,14 @@ class _ChatPageState extends State<ChatPage> {
                         Align(
                           alignment: Alignment.centerRight,
                           child: ConstrainedBox(
-                            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+                            constraints: BoxConstraints(
+                              maxWidth: MediaQuery.sizeOf(context).width * 0.82,
+                            ),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
                               decoration: BoxDecoration(
                                 color: _gold.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(14),
@@ -767,11 +1042,20 @@ class _ChatPageState extends State<ChatPage> {
                             if (_pending!.isImage)
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(10),
-                                child: Image.memory(_pending!.bytes, height: 72, fit: BoxFit.cover),
+                                child: Image.memory(
+                                  _pending!.bytes,
+                                  height: 72,
+                                  fit: BoxFit.cover,
+                                ),
                               )
                             else
                               Container(
-                                padding: const EdgeInsets.fromLTRB(12, 10, 36, 10),
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  10,
+                                  36,
+                                  10,
+                                ),
                                 decoration: BoxDecoration(
                                   color: _panel,
                                   borderRadius: BorderRadius.circular(12),
@@ -780,10 +1064,16 @@ class _ChatPageState extends State<ChatPage> {
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.insert_drive_file_outlined, color: _gold, size: 18),
+                                    const Icon(
+                                      Icons.insert_drive_file_outlined,
+                                      color: _gold,
+                                      size: 18,
+                                    ),
                                     const SizedBox(width: 8),
                                     ConstrainedBox(
-                                      constraints: const BoxConstraints(maxWidth: 220),
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 220,
+                                      ),
                                       child: Text(
                                         '${_pending!.name} · ${fmtSize(_pending!.bytes.length)}',
                                         overflow: TextOverflow.ellipsis,
@@ -801,9 +1091,11 @@ class _ChatPageState extends State<ChatPage> {
                                   foregroundColor: _text,
                                   padding: const EdgeInsets.all(4),
                                   minimumSize: const Size(28, 28),
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
                                 ),
-                                onPressed: () => setState(() => _pending = null),
+                                onPressed: () =>
+                                    setState(() => _pending = null),
                                 icon: const Icon(Icons.close, size: 14),
                               ),
                             ),
@@ -839,7 +1131,10 @@ class _ChatPageState extends State<ChatPage> {
                       ),
                       const SizedBox(width: 8),
                       IconButton.filled(
-                        style: IconButton.styleFrom(backgroundColor: _gold, foregroundColor: _ink),
+                        style: IconButton.styleFrom(
+                          backgroundColor: _gold,
+                          foregroundColor: _ink,
+                        ),
                         onPressed: _sending ? null : _send,
                         icon: const Icon(Icons.arrow_upward),
                       ),
@@ -856,7 +1151,11 @@ class _ChatPageState extends State<ChatPage> {
 }
 
 class _FileChip extends StatelessWidget {
-  const _FileChip({required this.file, required this.busy, required this.onTap});
+  const _FileChip({
+    required this.file,
+    required this.busy,
+    required this.onTap,
+  });
   final FileInfo file;
   final bool busy;
   final VoidCallback onTap;
@@ -877,7 +1176,9 @@ class _FileChip extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                file.mime.startsWith('image/') ? Icons.image_outlined : Icons.insert_drive_file_outlined,
+                file.mime.startsWith('image/')
+                    ? Icons.image_outlined
+                    : Icons.insert_drive_file_outlined,
                 color: _gold,
                 size: 20,
               ),
@@ -886,13 +1187,28 @@ class _FileChip extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    Text(fmtSize(file.size), style: const TextStyle(color: _muted, fontSize: 12)),
+                    Text(
+                      file.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    Text(
+                      fmtSize(file.size),
+                      style: const TextStyle(color: _muted, fontSize: 12),
+                    ),
                   ],
                 ),
               ),
               if (busy)
-                const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _gold))
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _gold,
+                  ),
+                )
               else
                 const Icon(Icons.save_alt, color: _muted, size: 18),
             ],

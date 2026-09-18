@@ -11,8 +11,11 @@ bool shouldNotify({
   ({String machine, int bot})? watching,
   bool foreground = true,
 }) {
-  if (kind != 'post' && kind != 'file') return false;
-  if (foreground && watching != null && watching.machine == machineId && watching.bot == botId) {
+  if (kind != 'post' && kind != 'file' && kind != 'question') return false;
+  if (foreground &&
+      watching != null &&
+      watching.machine == machineId &&
+      watching.bot == botId) {
     return false;
   }
   return true;
@@ -41,7 +44,9 @@ class Notify {
       },
     );
     await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.requestNotificationsPermission();
     final launch = await _plugin.getNotificationAppLaunchDetails();
     final p = launch?.notificationResponse?.payload;
@@ -66,7 +71,11 @@ class Notify {
         styleInformation: BigTextStyleInformation(body),
         icon: 'ic_stat_ccc',
       );
-      const darwin = DarwinNotificationDetails(presentAlert: true, presentSound: true, presentBadge: true);
+      const darwin = DarwinNotificationDetails(
+        presentAlert: true,
+        presentSound: true,
+        presentBadge: true,
+      );
       await _plugin.show(
         id: id,
         title: title,
@@ -78,7 +87,10 @@ class Notify {
   }
 
   static Future<void> startListening({required int machines}) async {
-    final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     if (android == null) return;
     await android.requestNotificationsPermission();
     const details = AndroidNotificationDetails(
@@ -97,14 +109,18 @@ class Notify {
       title: 'CCC is listening',
       body: n,
       notificationDetails: details,
-      foregroundServiceTypes: {AndroidServiceForegroundType.foregroundServiceTypeDataSync},
+      foregroundServiceTypes: {
+        AndroidServiceForegroundType.foregroundServiceTypeDataSync,
+      },
     );
   }
 
   static Future<void> stopListening() async {
     try {
       await _plugin
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
           ?.stopForegroundService();
     } catch (_) {}
   }

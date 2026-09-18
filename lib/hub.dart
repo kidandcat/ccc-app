@@ -28,7 +28,12 @@ Uint8List _unhex(String s) {
 }
 
 class Pairing {
-  Pairing({required this.hub, required this.instanceId, required this.instancePk, required this.code});
+  Pairing({
+    required this.hub,
+    required this.instanceId,
+    required this.instancePk,
+    required this.code,
+  });
   final String hub;
   final String instanceId;
   final String instancePk;
@@ -49,18 +54,63 @@ class Pairing {
 }
 
 class Machine {
-  Machine({required this.hub, required this.id, required this.pk, required this.name});
+  Machine({
+    required this.hub,
+    required this.id,
+    required this.pk,
+    required this.name,
+  });
   final String hub;
   final String id;
   final String pk;
   String name;
-  Map<String, dynamic> toJson() => {'hub': hub, 'id': id, 'pk': pk, 'name': name};
+  Map<String, dynamic> toJson() => {
+    'hub': hub,
+    'id': id,
+    'pk': pk,
+    'name': name,
+  };
   static Machine fromJson(Map<String, dynamic> j) => Machine(
-        hub: j['hub'] as String,
-        id: j['id'] as String,
-        pk: j['pk'] as String,
-        name: j['name'] as String? ?? 'ccc',
-      );
+    hub: j['hub'] as String,
+    id: j['id'] as String,
+    pk: j['pk'] as String,
+    name: j['name'] as String? ?? 'ccc',
+  );
+}
+
+class QuestionInfo {
+  QuestionInfo({
+    required this.id,
+    required this.botId,
+    required this.bot,
+    required this.question,
+    this.options = const [],
+    this.at,
+  });
+  final int id;
+  final int botId;
+  final String bot;
+  final String question;
+  final List<String> options;
+  final String? at;
+
+  factory QuestionInfo.fromJson(Map<String, dynamic> j) {
+    final opts = <String>[];
+    final raw = j['options'];
+    if (raw is List) {
+      for (final e in raw) {
+        if (e is String && e.trim().isNotEmpty) opts.add(e);
+      }
+    }
+    return QuestionInfo(
+      id: (j['id'] as num).toInt(),
+      botId: (j['bot_id'] as num?)?.toInt() ?? 0,
+      bot: j['bot'] as String? ?? '',
+      question: j['question'] as String? ?? j['text'] as String? ?? '',
+      options: opts,
+      at: j['at'] as String?,
+    );
+  }
 }
 
 class BotInfo {
@@ -74,6 +124,7 @@ class BotInfo {
     this.lastText,
     this.progress,
     this.archived = false,
+    this.question,
   });
   final int id;
   String name;
@@ -84,31 +135,62 @@ class BotInfo {
   final String? lastText;
   final String? progress;
   final bool archived;
-  factory BotInfo.fromJson(Map<String, dynamic> j) => BotInfo(
-        id: (j['id'] as num).toInt(),
-        name: j['name'] as String? ?? '',
-        role: j['role'] as String? ?? '',
-        status: j['status'] as String? ?? '',
-        engine: j['engine'] as String? ?? '',
-        last: j['last'] as String?,
-        lastText: j['last_text'] as String?,
-        progress: j['progress'] as String?,
-        archived: j['archived'] as bool? ?? false,
-      );
+  final QuestionInfo? question;
+  factory BotInfo.fromJson(Map<String, dynamic> j) {
+    QuestionInfo? q;
+    final raw = j['question'];
+    if (raw is Map) q = QuestionInfo.fromJson(Map<String, dynamic>.from(raw));
+    return BotInfo(
+      id: (j['id'] as num).toInt(),
+      name: j['name'] as String? ?? '',
+      role: j['role'] as String? ?? '',
+      status: j['status'] as String? ?? '',
+      engine: j['engine'] as String? ?? '',
+      last: j['last'] as String?,
+      lastText: j['last_text'] as String?,
+      progress: j['progress'] as String?,
+      archived: j['archived'] as bool? ?? false,
+      question: q,
+    );
+  }
+}
+
+String statusLabel(String status) {
+  switch (status) {
+    case 'running':
+    case 'waiting':
+    case 'idle':
+      return status;
+    case 'disabled':
+      return 'idle';
+    default:
+      return status.trim().isEmpty ? 'idle' : status;
+  }
+}
+
+String statusCaption(String status) {
+  final s = statusLabel(status);
+  if (s.isEmpty) return s;
+  return '${s[0].toUpperCase()}${s.substring(1)}';
 }
 
 class FileInfo {
-  FileInfo({required this.id, required this.name, required this.mime, required this.size});
+  FileInfo({
+    required this.id,
+    required this.name,
+    required this.mime,
+    required this.size,
+  });
   final int id;
   final String name;
   final String mime;
   final int size;
   factory FileInfo.fromJson(Map<String, dynamic> j) => FileInfo(
-        id: (j['id'] as num).toInt(),
-        name: j['name'] as String? ?? 'file',
-        mime: j['mime'] as String? ?? 'application/octet-stream',
-        size: (j['size'] as num?)?.toInt() ?? 0,
-      );
+    id: (j['id'] as num).toInt(),
+    name: j['name'] as String? ?? 'file',
+    mime: j['mime'] as String? ?? 'application/octet-stream',
+    size: (j['size'] as num?)?.toInt() ?? 0,
+  );
 }
 
 class PendingAttach {
@@ -121,7 +203,8 @@ class PendingAttach {
 
 String fmtSize(int n) {
   if (n < 1024) return '$n B';
-  if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(n < 10 * 1024 ? 1 : 0)} KB';
+  if (n < 1024 * 1024)
+    return '${(n / 1024).toStringAsFixed(n < 10 * 1024 ? 1 : 0)} KB';
   return '${(n / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
@@ -200,7 +283,9 @@ class Store {
   static Future<List<Machine>> load() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getStringList(_k) ?? [];
-    return raw.map((e) => Machine.fromJson(jsonDecode(e) as Map<String, dynamic>)).toList();
+    return raw
+        .map((e) => Machine.fromJson(jsonDecode(e) as Map<String, dynamic>))
+        .toList();
   }
 
   static Future<void> save(List<Machine> ms) async {
@@ -215,7 +300,19 @@ List<BotInfo> botsFrom(Map<String, dynamic> res) {
   final list = <BotInfo>[];
   if (raw is List) {
     for (final e in raw) {
-      list.add(BotInfo.fromJson(e as Map<String, dynamic>));
+      list.add(BotInfo.fromJson(Map<String, dynamic>.from(e as Map)));
+    }
+  }
+  return list;
+}
+
+List<QuestionInfo> questionsFrom(Map<String, dynamic> res) {
+  final body = res['body'];
+  final raw = body is String ? jsonDecode(body) : body;
+  final list = <QuestionInfo>[];
+  if (raw is List) {
+    for (final e in raw) {
+      list.add(QuestionInfo.fromJson(Map<String, dynamic>.from(e as Map)));
     }
   }
   return list;
@@ -237,8 +334,11 @@ class HubSession {
   final _pending = <String, Completer<Map<String, dynamic>>>{};
   final _listeners = <void Function(String kind, Map<String, dynamic> body)>[];
 
-  void addListener(void Function(String kind, Map<String, dynamic> body) f) => _listeners.add(f);
-  void removeListener(void Function(String kind, Map<String, dynamic> body) f) => _listeners.remove(f);
+  void addListener(void Function(String kind, Map<String, dynamic> body) f) =>
+      _listeners.add(f);
+  void removeListener(
+    void Function(String kind, Map<String, dynamic> body) f,
+  ) => _listeners.remove(f);
 
   static Future<HubIdentity> loadIdentity() async {
     const store = FlutterSecureStorage();
@@ -280,8 +380,13 @@ class HubSession {
     if (!_want) return;
     final gen = _gen;
     try {
-      _ch = IOWebSocketChannel.connect(_ws(machine.hub), pingInterval: const Duration(seconds: 20));
-      _ch!.sink.add(jsonEncode({'v': 1, 't': 'open', 'role': 'device', 'pk': identity.id}));
+      _ch = IOWebSocketChannel.connect(
+        _ws(machine.hub),
+        pingInterval: const Duration(seconds: 20),
+      );
+      _ch!.sink.add(
+        jsonEncode({'v': 1, 't': 'open', 'role': 'device', 'pk': identity.id}),
+      );
       _sub = _ch!.stream.listen(
         _onFrame,
         onError: (_) {
@@ -298,6 +403,9 @@ class HubSession {
         } catch (_) {}
       });
       _backoff = 1;
+      for (final f in List.of(_listeners)) {
+        f('up', {});
+      }
     } catch (_) {
       if (gen == _gen) _dropped();
     }
@@ -361,7 +469,9 @@ class HubSession {
       myPrivateKey: nacl.PrivateKey(identity.private),
       theirPublicKey: nacl.PublicKey(_unhex(machine.pk)),
     );
-    final opened = box.decrypt(nacl.EncryptedMessage(cipherText: ct, nonce: nonce));
+    final opened = box.decrypt(
+      nacl.EncryptedMessage(cipherText: ct, nonce: nonce),
+    );
     final rpc = jsonDecode(utf8.decode(opened)) as Map<String, dynamic>;
     final kind = rpc['kind'] as String? ?? '';
     if (kind == 'event') {
@@ -392,13 +502,15 @@ class HubSession {
     _pending['pair'] = c;
     final intro = jsonEncode({'name': 'phone', 'pk': identity.id});
     final sealed = _seal(utf8.encode(intro), p.instancePk);
-    _ch!.sink.add(jsonEncode({
-      'v': 1,
-      't': 'pair',
-      'code': p.code,
-      'n': _b64e(sealed.$1),
-      'b': _b64e(sealed.$2),
-    }));
+    _ch!.sink.add(
+      jsonEncode({
+        'v': 1,
+        't': 'pair',
+        'code': p.code,
+        'n': _b64e(sealed.$1),
+        'b': _b64e(sealed.$2),
+      }),
+    );
     return c.future.timeout(const Duration(seconds: 20));
   }
 
@@ -417,14 +529,16 @@ class HubSession {
       'params': ?params,
     });
     final sealed = _seal(utf8.encode(payload), machine.pk);
-    _ch!.sink.add(jsonEncode({
-      'v': 1,
-      't': 'fwd',
-      'to': machine.id,
-      'id': id,
-      'n': _b64e(sealed.$1),
-      'b': _b64e(sealed.$2),
-    }));
+    _ch!.sink.add(
+      jsonEncode({
+        'v': 1,
+        't': 'fwd',
+        'to': machine.id,
+        'id': id,
+        'n': _b64e(sealed.$1),
+        'b': _b64e(sealed.$2),
+      }),
+    );
     final rpc = await c.future.timeout(timeout);
     if (rpc['ok'] == false) {
       throw rpc['error'] ?? 'error';
@@ -453,31 +567,22 @@ class HubSession {
       throw 'File is too large (max 50 MB)';
     }
     if (bytes.length <= hubFileInlineMax) {
-      await rpc(
-        'send',
-        {
-          'bot_id': botId,
-          if (text.isNotEmpty) 'text': text,
-          'file': {
-            'name': name,
-            'mime': mime,
-            'data': base64Encode(bytes),
-          },
-        },
-        const Duration(seconds: 40),
-      );
+      await rpc('send', {
+        'bot_id': botId,
+        if (text.isNotEmpty) 'text': text,
+        'file': {'name': name, 'mime': mime, 'data': base64Encode(bytes)},
+      }, const Duration(seconds: 40));
       return;
     }
-    final begin = _rpcBody(await rpc(
-      'put_begin',
-      {
+    final begin = _rpcBody(
+      await rpc('put_begin', {
         'bot_id': botId,
         'name': name,
         'mime': mime,
         'size': bytes.length,
         if (text.isNotEmpty) 'text': text,
-      },
-    ));
+      }),
+    );
     final uploadId = begin['upload_id'] as String? ?? '';
     final n = (begin['n'] as num?)?.toInt() ?? 1;
     if (uploadId.isEmpty) throw 'upload failed';
@@ -485,28 +590,25 @@ class HubSession {
       final start = i * hubChunkBytes;
       var end = start + hubChunkBytes;
       if (end > bytes.length) end = bytes.length;
-      await rpc(
-        'put_chunk',
-        {
-          'upload_id': uploadId,
-          'i': i,
-          'data': base64Encode(bytes.sublist(start, end)),
-        },
-        const Duration(seconds: 40),
-      );
-    }
-    await rpc(
-      'put_commit',
-      {
+      await rpc('put_chunk', {
         'upload_id': uploadId,
-        if (text.isNotEmpty) 'text': text,
-      },
-      const Duration(seconds: 40),
-    );
+        'i': i,
+        'data': base64Encode(bytes.sublist(start, end)),
+      }, const Duration(seconds: 40));
+    }
+    await rpc('put_commit', {
+      'upload_id': uploadId,
+      if (text.isNotEmpty) 'text': text,
+    }, const Duration(seconds: 40));
   }
 
   Future<Uint8List> fetchFile(int fileId) async {
-    final first = _rpcBody(await rpc('get_chunk', {'file_id': fileId, 'i': 0}, const Duration(seconds: 40)));
+    final first = _rpcBody(
+      await rpc('get_chunk', {
+        'file_id': fileId,
+        'i': 0,
+      }, const Duration(seconds: 40)),
+    );
     final n = (first['n'] as num?)?.toInt() ?? 1;
     final size = (first['size'] as num?)?.toInt() ?? 0;
     final out = BytesBuilder(copy: false);
@@ -517,7 +619,14 @@ class HubSession {
 
     addChunk(first);
     for (var i = 1; i < n; i++) {
-      addChunk(_rpcBody(await rpc('get_chunk', {'file_id': fileId, 'i': i}, const Duration(seconds: 40))));
+      addChunk(
+        _rpcBody(
+          await rpc('get_chunk', {
+            'file_id': fileId,
+            'i': i,
+          }, const Duration(seconds: 40)),
+        ),
+      );
     }
     final bytes = out.toBytes();
     if (size > 0 && bytes.length != size) {

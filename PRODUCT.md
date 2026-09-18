@@ -10,9 +10,10 @@ Pairing is TOFU. `ccc pair` prints a URI whose query carries the instance public
 
 - Machine list (several ccc instances: Mac, VPS, …)
 - Pair a machine (paste URI from `ccc pair`)
-- Session list on a machine (live, most recently active first)
+- Session list on a machine (live, most recently active first). Backend workers General opens appear here with live status (running / waiting / idle). They drop off the list when archived or closed. The phone reloads `bots` on hub `session`/`archive` events and polls listen every few seconds — same hub RPC as chat, not a second API.
 - Rename a session (tap the title)
 - Archive a session (swipe, no confirm) so it leaves the main list; restore from Archived
+- Decisions inbox: unanswered `ask_owner` questions stay in a banner / Decisions screen / sticky card above chat (Telegram-style option buttons). Answering there is hub `answer` (same as tapping the Telegram button). They cannot scroll away in the thread.
 - Chat with one session (history + send + photos + any file up to 50 MB including APKs + GitHub-flavored Markdown including tables + live thinking/tool progress that is restored when you leave and come back)
 - Receive files the session sends (`send_file`): tap the chip to download and share/save
-- Push notification on the phone when a session posts a new message, including when the app is in the background (Android keeps the hub socket alive in a dataSync foreground service)
+- Push notification on the phone when a session posts a new message or asks a question (`ask_owner`), including when the app is in the background (Android keeps the hub socket alive in a dataSync foreground service)

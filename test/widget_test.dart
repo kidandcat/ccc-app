@@ -1,4 +1,5 @@
 import 'package:ccc_app/crew.dart';
+import 'package:ccc_app/decisions.dart';
 import 'package:ccc_app/hub.dart';
 import 'package:ccc_app/md.dart';
 import 'package:ccc_app/notify.dart';
@@ -30,13 +31,84 @@ void main() {
     expect(b.name, 'CCC app');
   });
 
+  test('parses ask_owner questions', () {
+    final q = QuestionInfo.fromJson({
+      'id': 4,
+      'bot_id': 9,
+      'bot': 'Deployer',
+      'question': 'Ship to prod?',
+      'options': ['ship', 'hold'],
+      'at': '2026-09-18T10:00:00Z',
+    });
+    expect(q.bot, 'Deployer');
+    expect(q.options, ['ship', 'hold']);
+    final b = BotInfo.fromJson({
+      'id': 9,
+      'name': 'Deployer',
+      'role': '',
+      'status': 'waiting',
+      'engine': 'grok',
+      'question': {
+        'id': 4,
+        'bot_id': 9,
+        'bot': 'Deployer',
+        'question': 'Ship to prod?',
+        'options': ['ship', 'hold'],
+      },
+    });
+    expect(b.question?.id, 4);
+    expect(statusLabel('waiting'), 'waiting');
+    expect(statusLabel('disabled'), 'idle');
+  });
+
+  test('parses pending ask_owner on a bot and the questions list', () {
+    final b = BotInfo.fromJson({
+      'id': 3,
+      'name': 'Deploy',
+      'role': '',
+      'status': 'waiting',
+      'engine': 'grok',
+      'question': {
+        'id': 11,
+        'bot_id': 3,
+        'bot': 'Deploy',
+        'question': 'Ship to prod?',
+        'options': ['ship', 'hold'],
+      },
+    });
+    expect(b.status, 'waiting');
+    expect(b.question?.question, 'Ship to prod?');
+    expect(b.question?.options, ['ship', 'hold']);
+    expect(statusLabel('waiting'), 'waiting');
+    expect(statusLabel('disabled'), 'idle');
+    final qs = questionsFrom({
+      'body': [
+        {
+          'id': 11,
+          'bot_id': 3,
+          'bot': 'Deploy',
+          'question': 'Ship to prod?',
+          'options': ['ship', 'hold'],
+        },
+      ],
+    });
+    expect(qs, hasLength(1));
+    expect(qs.first.id, 11);
+    expect(qs.first.options, ['ship', 'hold']);
+  });
+
   test('notifies on post unless that chat is open in the foreground', () {
     expect(
       shouldNotify(kind: 'post', machineId: 'mac', botId: 1, watching: null),
       isTrue,
     );
     expect(
-      shouldNotify(kind: 'progress', machineId: 'mac', botId: 1, watching: null),
+      shouldNotify(
+        kind: 'progress',
+        machineId: 'mac',
+        botId: 1,
+        watching: null,
+      ),
       isFalse,
     );
     expect(
@@ -67,7 +139,28 @@ void main() {
       ),
       isTrue,
     );
-    expect(shouldNotify(kind: 'file', machineId: 'mac', botId: 1, watching: null), isTrue);
+    expect(
+      shouldNotify(kind: 'file', machineId: 'mac', botId: 1, watching: null),
+      isTrue,
+    );
+    expect(
+      shouldNotify(
+        kind: 'question',
+        machineId: 'mac',
+        botId: 1,
+        watching: null,
+      ),
+      isTrue,
+    );
+    expect(
+      shouldNotify(
+        kind: 'question',
+        machineId: 'mac',
+        botId: 1,
+        watching: (machine: 'mac', bot: 1),
+      ),
+      isFalse,
+    );
   });
 
   test('parses file attachments on turns', () {
@@ -79,7 +172,12 @@ void main() {
       'status': 'done',
       'at': '2026-09-16T12:00:00Z',
       'files': [
-        {'id': 9, 'name': 'ccc.apk', 'mime': 'application/vnd.android.package-archive', 'size': 19300000},
+        {
+          'id': 9,
+          'name': 'ccc.apk',
+          'mime': 'application/vnd.android.package-archive',
+          'size': 19300000,
+        },
       ],
     });
     expect(t.files, hasLength(1));
@@ -91,7 +189,10 @@ void main() {
 
   test('keeps thinking text when reopening a running turn', () {
     expect(
-      Crew.resolveProgress(status: 'running', turnProgress: 'reading main.dart · 8s'),
+      Crew.resolveProgress(
+        status: 'running',
+        turnProgress: 'reading main.dart · 8s',
+      ),
       'reading main.dart · 8s',
     );
     expect(
@@ -103,10 +204,17 @@ void main() {
       'call grep · 3s',
     );
     expect(
-      Crew.resolveProgress(status: 'running', turnProgress: '', current: 'thinking · 2s'),
+      Crew.resolveProgress(
+        status: 'running',
+        turnProgress: '',
+        current: 'thinking · 2s',
+      ),
       'thinking · 2s',
     );
-    expect(Crew.resolveProgress(status: 'running', turnProgress: ''), 'working');
+    expect(
+      Crew.resolveProgress(status: 'running', turnProgress: ''),
+      'working',
+    );
     expect(Crew.resolveProgress(status: 'queued', turnProgress: ''), 'queued');
     expect(Crew.resolveProgress(status: 'done', turnProgress: ''), '');
   });
@@ -160,5 +268,51 @@ void main() {
     expect(p?.machine, 'abc');
     expect(p?.bot, 9);
     expect(parseNotifyPayload('nope'), isNull);
+  });
+
+  testWidgets('decision card shows Telegram-style option buttons', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DecisionCard(
+            machine: Machine(hub: 'wss://h', id: 'ab', pk: 'cd', name: 'mac'),
+            question: QuestionInfo(
+              id: 1,
+              botId: 2,
+              bot: 'Deploy',
+              question: 'Ship to prod?',
+              options: ['ship', 'hold'],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Ship to prod?'), findsOneWidget);
+    expect(find.text('ship'), findsOneWidget);
+    expect(find.text('hold'), findsOneWidget);
+    expect(find.text('Deploy'), findsOneWidget);
+    expect(find.byType(FilledButton), findsOneWidget);
+    expect(find.byType(OutlinedButton), findsOneWidget);
+  });
+
+  testWidgets('status mark labels running waiting idle', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              StatusMark('running'),
+              StatusMark('waiting'),
+              StatusMark('idle'),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Running'), findsOneWidget);
+    expect(find.text('Waiting'), findsOneWidget);
+    expect(find.text('Idle'), findsOneWidget);
   });
 }
