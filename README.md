@@ -9,6 +9,8 @@ ccc pair          # on the machine
 
 The default hub (`wss://hub.mentasystems.com`) is a free encrypted relay. It cannot read your chats. Run `ccc hub` yourself if you want it on your metal.
 
+Live sessions (workers General opens) appear on the machine’s list with running / waiting / idle, and drop off when archived. Unanswered `ask_owner` questions stay in a Decisions inbox and a sticky card above chat — same option buttons as Telegram.
+
 - License: MIT
 - Privacy: https://hub.mentasystems.com/privacy
 - Issues: https://github.com/kidandcat/ccc/issues

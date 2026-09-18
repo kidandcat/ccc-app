@@ -116,9 +116,17 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
     await refreshQuestions();
     _poll?.cancel();
     _poll = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!foreground) return;
       refreshQuestions();
     });
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   HubSession sessionFor(Machine m) {

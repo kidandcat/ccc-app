@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:ccc_app/crew.dart';
 import 'package:ccc_app/decisions.dart';
 import 'package:ccc_app/hub.dart';
@@ -316,5 +318,80 @@ void main() {
     expect(find.text('Running'), findsOneWidget);
     expect(find.text('Waiting'), findsOneWidget);
     expect(find.text('Idle'), findsOneWidget);
+  });
+
+  test('pendingDecisions lists live ask_owner questions', () {
+    final crew = Crew(HubIdentity(Uint8List(32), Uint8List(32)));
+    addTearDown(crew.dispose);
+    final mac = Machine(hub: 'wss://h', id: 'mac', pk: 'cd', name: 'Mac');
+    crew.machines = [mac];
+    crew.questions[mac.id] = [
+      QuestionInfo(
+        id: 7,
+        botId: 3,
+        bot: 'Deploy',
+        question: 'Ship to prod?',
+        options: ['ship', 'hold'],
+      ),
+    ];
+    expect(crew.pendingDecisions, hasLength(1));
+    expect(crew.pendingDecisions.first.question.id, 7);
+    expect(crew.questionFor('mac', 3)?.question, 'Ship to prod?');
+    expect(crew.questionFor('mac', 9), isNull);
+    crew.questions[mac.id] = [];
+    expect(crew.pendingDecisions, isEmpty);
+  });
+
+  test('live bots RPC payload drops archived workers', () {
+    final bots = botsFrom({
+      'body': [
+        {
+          'id': 1,
+          'name': 'Live',
+          'role': '',
+          'status': 'running',
+          'engine': 'grok',
+        },
+        {
+          'id': 2,
+          'name': 'Gone',
+          'role': '',
+          'status': 'idle',
+          'engine': 'grok',
+          'archived': true,
+        },
+      ],
+    });
+    expect(bots.map((b) => b.id), [1, 2]);
+    final live = bots.where((b) => !b.archived).toList();
+    expect(live, hasLength(1));
+    expect(live.first.name, 'Live');
+    expect(statusCaption('idle'), 'Idle');
+  });
+
+  testWidgets('decisions page lists pending ask_owner buttons', (tester) async {
+    final crew = Crew(HubIdentity(Uint8List(32), Uint8List(32)));
+    final mac = Machine(hub: 'wss://h', id: 'mac', pk: 'cd', name: 'Mac');
+    crew.machines = [mac];
+    crew.questions[mac.id] = [
+      QuestionInfo(
+        id: 7,
+        botId: 3,
+        bot: 'Deploy',
+        question: 'Ship to prod?',
+        options: ['ship', 'hold'],
+      ),
+    ];
+    addTearDown(crew.dispose);
+    await tester.pumpWidget(
+      CrewScope(
+        crew: crew,
+        child: const MaterialApp(home: DecisionsPage()),
+      ),
+    );
+    expect(find.text('Ship to prod?'), findsOneWidget);
+    expect(find.text('ship'), findsOneWidget);
+    expect(find.text('hold'), findsOneWidget);
+    expect(find.text('Deploy'), findsOneWidget);
   });
 }

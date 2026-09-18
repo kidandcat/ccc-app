@@ -244,7 +244,10 @@ class _MachinesPageState extends State<MachinesPage> {
           : Column(
               children: [
                 if (crew.pendingDecisions.isNotEmpty)
-                  const DecisionBanner(machine: null),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: DecisionBanner(machine: null),
+                  ),
                 Expanded(
                   child: ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
@@ -377,7 +380,10 @@ class _BotsPageState extends State<BotsPage> {
       final res = await _s!.rpc(widget.archived ? 'archived' : 'bots');
       if (!mounted) return;
       setState(() {
-        _bots = botsFrom(res).where((b) => !_archiving.contains(b.id)).toList();
+        _bots = botsFrom(res)
+            .where((b) => !_archiving.contains(b.id))
+            .where((b) => widget.archived || !b.archived)
+            .toList();
         _err = null;
       });
     } catch (e) {
@@ -510,12 +516,12 @@ class _BotsPageState extends State<BotsPage> {
                     },
                     child: _bots.isEmpty
                         ? ListView(
-                            children: const [
-                              SizedBox(height: 120),
+                            children: [
+                              const SizedBox(height: 120),
                               Text(
-                                'No sessions here.',
+                                widget.archived ? 'Nothing archived.' : 'When General opens a worker, it shows up here.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: _muted),
+                                style: const TextStyle(color: _muted),
                               ),
                             ],
                           )
