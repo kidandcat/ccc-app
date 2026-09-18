@@ -284,7 +284,7 @@ class _MachinesPageState extends State<MachinesPage> {
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => BotsPage(machine: m),
+                            builder: (_) => MachineHome(machine: m),
                           ),
                         ),
                         onLongPress: () => crew.removeAt(i),
@@ -295,6 +295,105 @@ class _MachinesPageState extends State<MachinesPage> {
               ],
             ),
     );
+  }
+}
+
+/// Machine home is General — the dispatcher — matching the Telegram DM.
+class MachineHome extends StatefulWidget {
+  const MachineHome({super.key, required this.machine});
+  final Machine machine;
+  @override
+  State<MachineHome> createState() => _MachineHomeState();
+}
+
+class _MachineHomeState extends State<MachineHome> {
+  HubSession? _s;
+  BotInfo? _general;
+  String? _err;
+  bool _booted = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_booted) return;
+    _booted = true;
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    try {
+      _s = CrewScope.read(context).sessionFor(widget.machine);
+      await _s!.connect();
+      await _load();
+    } catch (e) {
+      if (mounted) setState(() => _err = '$e');
+    }
+  }
+
+  Future<void> _load() async {
+    if (_s == null) return;
+    try {
+      final bots = botsFrom(await _s!.rpc('bots'));
+      if (!mounted) return;
+      setState(() {
+        _general = generalOf(bots);
+        _err = _general == null
+            ? 'General is not up on this machine yet.'
+            : null;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _err = '$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_err != null && _general == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(
+            widget.machine.name,
+            style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700),
+          ),
+          actions: [
+            if (_s != null)
+              IconButton(
+                tooltip: 'Sessions',
+                icon: const Icon(Icons.layers_outlined),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        BotsPage(machine: widget.machine, session: _s),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(
+              _err!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _muted),
+            ),
+          ),
+        ),
+      );
+    }
+    if (_s == null || _general == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(
+            widget.machine.name,
+            style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700),
+          ),
+        ),
+        body: const Center(child: CircularProgressIndicator(color: _gold)),
+      );
+    }
+    return ChatPage(session: _s!, bot: _general!, machine: widget.machine);
   }
 }
 
@@ -383,6 +482,7 @@ class _BotsPageState extends State<BotsPage> {
         _bots = botsFrom(res)
             .where((b) => !_archiving.contains(b.id))
             .where((b) => widget.archived || !b.archived)
+            .where((b) => widget.archived || !b.isGeneral)
             .toList();
         _err = null;
       });
@@ -392,7 +492,7 @@ class _BotsPageState extends State<BotsPage> {
   }
 
   Future<void> _archiveNow(BotInfo b, int index) async {
-    if (_s == null) return;
+    if (_s == null || b.isGeneral) return;
     _archiving.add(b.id);
     setState(() => _bots.removeWhere((x) => x.id == b.id));
     try {
@@ -425,6 +525,7 @@ class _BotsPageState extends State<BotsPage> {
   }
 
   Future<void> _rename(BotInfo b) async {
+    if (b.isGeneral) return;
     final name = await _askName(
       context,
       title: 'Rename session',
@@ -446,7 +547,7 @@ class _BotsPageState extends State<BotsPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.archived ? 'Archived' : widget.machine.name,
+          widget.archived ? 'Archived' : 'Sessions',
           style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700),
         ),
         actions: [
@@ -613,7 +714,7 @@ class _BotsPageState extends State<BotsPage> {
                                     ? null
                                     : () => _rename(b),
                               );
-                              if (widget.archived) return tile;
+                              if (widget.archived || b.isGeneral) return tile;
                               return Dismissible(
                                 key: ValueKey(b.id),
                                 direction: DismissDirection.endToStart,
@@ -779,6 +880,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _rename() async {
+    if (widget.bot.isGeneral) return;
     final name = await _askName(
       context,
       title: 'Rename session',
@@ -964,12 +1066,13 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     final crew = CrewScope.of(context);
     final pending = crew.questionFor(widget.machine.id, widget.bot.id);
+    final general = widget.bot.isGeneral;
     return Scaffold(
       appBar: AppBar(
         title: GestureDetector(
-          onTap: _rename,
+          onTap: general ? null : _rename,
           child: Text(
-            widget.bot.name,
+            general ? 'General' : widget.bot.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: GoogleFonts.sourceSerif4(fontWeight: FontWeight.w700),
@@ -978,11 +1081,26 @@ class _ChatPageState extends State<ChatPage> {
         actions: [
           StatusMark(pending != null ? 'waiting' : widget.bot.status),
           const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Rename session',
-            icon: const Icon(Icons.edit_outlined, size: 20),
-            onPressed: _rename,
-          ),
+          if (general)
+            IconButton(
+              tooltip: 'Sessions',
+              icon: const Icon(Icons.layers_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => BotsPage(
+                    machine: widget.machine,
+                    session: widget.session,
+                  ),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              tooltip: 'Rename session',
+              icon: const Icon(Icons.edit_outlined, size: 20),
+              onPressed: _rename,
+            ),
         ],
       ),
       body: Column(
@@ -1014,14 +1132,33 @@ class _ChatPageState extends State<ChatPage> {
                   );
                 }
                 final t = _turns[_turns.length - 1 - (i - extra)];
+                final view = TurnDisplay.from(
+                  t,
+                  inGeneral: widget.bot.isGeneral,
+                );
+                if (view.hide) return const SizedBox.shrink();
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 14),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (t.input.isNotEmpty)
+                      if (view.caption != null && view.caption!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            view.caption!,
+                            style: const TextStyle(
+                              color: _muted,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      if (view.quote != null && view.quote!.trim().isNotEmpty)
                         Align(
-                          alignment: Alignment.centerRight,
+                          alignment: view.owner
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
                           child: ConstrainedBox(
                             constraints: BoxConstraints(
                               maxWidth: MediaQuery.sizeOf(context).width * 0.82,
@@ -1032,16 +1169,21 @@ class _ChatPageState extends State<ChatPage> {
                                 vertical: 10,
                               ),
                               decoration: BoxDecoration(
-                                color: _gold.withValues(alpha: 0.15),
+                                color: view.owner
+                                    ? _gold.withValues(alpha: 0.15)
+                                    : _panel,
                                 borderRadius: BorderRadius.circular(14),
+                                border: view.owner
+                                    ? null
+                                    : Border.all(color: _line),
                               ),
-                              child: MdBody(t.input),
+                              child: MdBody(view.quote!),
                             ),
                           ),
                         ),
-                      if (t.output.isNotEmpty) ...[
+                      if (view.output.trim().isNotEmpty) ...[
                         const SizedBox(height: 8),
-                        MdBody(t.output),
+                        MdBody(view.output),
                       ],
                       for (final f in t.files) ...[
                         const SizedBox(height: 8),
@@ -1147,7 +1289,9 @@ class _ChatPageState extends State<ChatPage> {
                           maxLines: 5,
                           textInputAction: TextInputAction.send,
                           decoration: InputDecoration(
-                            hintText: 'Message',
+                            hintText: widget.bot.isGeneral
+                                ? 'Message General'
+                                : 'Tell this session',
                             hintStyle: const TextStyle(color: _muted),
                             filled: true,
                             fillColor: _panel,

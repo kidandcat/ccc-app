@@ -103,8 +103,18 @@ void main() {
 
   test('notifies on post unless that chat is open in the foreground', () {
     expect(
-      shouldNotify(kind: 'post', machineId: 'mac', botId: 1, watching: null),
+      shouldNotify(
+        kind: 'post',
+        machineId: 'mac',
+        botId: 1,
+        watching: null,
+        general: true,
+      ),
       isTrue,
+    );
+    expect(
+      shouldNotify(kind: 'post', machineId: 'mac', botId: 1, watching: null),
+      isFalse,
     );
     expect(
       shouldNotify(
@@ -121,6 +131,7 @@ void main() {
         machineId: 'mac',
         botId: 1,
         watching: (machine: 'mac', bot: 1),
+        general: true,
       ),
       isFalse,
     );
@@ -130,6 +141,7 @@ void main() {
         machineId: 'mac',
         botId: 1,
         watching: (machine: 'mac', bot: 2),
+        general: true,
       ),
       isTrue,
     );
@@ -140,6 +152,7 @@ void main() {
         botId: 1,
         watching: (machine: 'mac', bot: 1),
         foreground: false,
+        general: true,
       ),
       isTrue,
     );
@@ -340,6 +353,93 @@ void main() {
     expect(crew.questionFor('mac', 9), isNull);
     crew.questions[mac.id] = [];
     expect(crew.pendingDecisions, isEmpty);
+  });
+
+  test('marks General from hub flag, topic_id, or name fallback', () {
+    final flagged = BotInfo.fromJson({
+      'id': 1,
+      'name': 'General',
+      'role': '',
+      'status': 'idle',
+      'engine': 'grok',
+      'topic_id': 0,
+      'general': true,
+    });
+    expect(flagged.isGeneral, isTrue);
+    expect(flagged.topicId, 0);
+    final worker = BotInfo.fromJson({
+      'id': 2,
+      'name': 'deploy-watch',
+      'role': '',
+      'status': 'running',
+      'engine': 'grok',
+      'topic_id': -2,
+      'general': false,
+    });
+    expect(worker.isGeneral, isFalse);
+    final oldListen = BotInfo.fromJson({
+      'id': 3,
+      'name': 'General',
+      'role': '',
+      'status': 'idle',
+      'engine': 'grok',
+    });
+    expect(oldListen.isGeneral, isTrue);
+    expect(oldListen.topicId, isNull);
+    final namedWorker = BotInfo.fromJson({
+      'id': 4,
+      'name': 'landing',
+      'role': '',
+      'status': 'idle',
+      'engine': 'grok',
+    });
+    expect(namedWorker.isGeneral, isFalse);
+    final bots = [flagged, worker, namedWorker];
+    expect(generalOf(bots)?.id, 1);
+    expect(workersOf(bots).map((b) => b.id), [2, 4]);
+  });
+
+  test('turn display hides system injections on General and inbox reports', () {
+    final report = TurnInfo.fromJson({
+      'id': 1,
+      'source': 'bot',
+      'input': 'Message from deploy-watch:\nhealth 200',
+      'output': 'replica is caught up',
+      'status': 'done',
+      'at': '2026-09-18T10:00:00Z',
+    });
+    final onGeneral = TurnDisplay.from(report, inGeneral: true);
+    expect(onGeneral.owner, isFalse);
+    expect(onGeneral.caption, 'deploy-watch');
+    expect(onGeneral.quote, isNull);
+    expect(onGeneral.output, 'replica is caught up');
+    final onWorker = TurnDisplay.from(report, inGeneral: false);
+    expect(onWorker.caption, 'deploy-watch');
+    expect(onWorker.quote, 'health 200');
+    final user = TurnInfo.fromJson({
+      'id': 2,
+      'source': 'user',
+      'input': 'watch the deploy',
+      'output': 'session deploy-watch started',
+      'status': 'done',
+      'at': '2026-09-18T10:00:00Z',
+    });
+    final you = TurnDisplay.from(user, inGeneral: true);
+    expect(you.owner, isTrue);
+    expect(you.quote, 'watch the deploy');
+    final sys = TurnInfo.fromJson({
+      'id': 3,
+      'source': 'system',
+      'input': 'this work is too long for General',
+      'output': '',
+      'status': 'done',
+      'at': '2026-09-18T10:00:00Z',
+    });
+    expect(TurnDisplay.from(sys, inGeneral: true).hide, isTrue);
+    expect(
+      inboxPayload('Message from deploy-watch:\nhealth 200').sender,
+      'deploy-watch',
+    );
   });
 
   test('live bots RPC payload drops archived workers', () {

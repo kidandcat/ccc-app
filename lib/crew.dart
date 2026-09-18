@@ -284,16 +284,20 @@ class Crew extends ChangeNotifier with WidgetsBindingObserver {
     if (kind == 'post' || kind == 'file') {
       setProgress(m.id, botId, '');
     }
+    final name = (body['bot'] as String?)?.trim();
+    final general =
+        body['general'] == true ||
+        (body['general'] == null && (name ?? '').toLowerCase() == 'general');
     if (!shouldNotify(
       kind: kind,
       machineId: m.id,
       botId: botId,
       watching: watching,
       foreground: foreground,
+      general: general,
     )) {
       return;
     }
-    final name = (body['bot'] as String?)?.trim();
     final title = kind == 'question'
         ? ((name == null || name.isEmpty) ? 'Decision' : name)
         : ((name == null || name.isEmpty) ? m.name : name);

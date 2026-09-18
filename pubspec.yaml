@@ -1,7 +1,7 @@
 name: ccc_app
-description: Crew Command Center — talk to your ccc bots from the phone.
+description: ccc — talk to General from the phone. Sessions are backend workers.
 publish_to: "none"
-version: 0.1.7+9
+version: 0.1.8+10
 
 environment:
   sdk: ^3.13.1

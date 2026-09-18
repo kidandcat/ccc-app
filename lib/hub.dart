@@ -125,6 +125,8 @@ class BotInfo {
     this.progress,
     this.archived = false,
     this.question,
+    this.topicId,
+    this.generalFlag,
   });
   final int id;
   String name;
@@ -136,6 +138,23 @@ class BotInfo {
   final String? progress;
   final bool archived;
   final QuestionInfo? question;
+
+  /// 0 is General. Null means the listen binary did not send topic_id.
+  final int? topicId;
+
+  /// True when listen marked this row as General. Null = field absent.
+  final bool? generalFlag;
+
+  /// Dispatcher session. Prefer the hub flag; fall back to topic_id 0, then name.
+  bool get isGeneral {
+    if (generalFlag == true) return true;
+    if (topicId == 0) return true;
+    if (generalFlag == null && topicId == null) {
+      return name.toLowerCase() == 'general';
+    }
+    return false;
+  }
+
   factory BotInfo.fromJson(Map<String, dynamic> j) {
     QuestionInfo? q;
     final raw = j['question'];
@@ -151,6 +170,82 @@ class BotInfo {
       progress: j['progress'] as String?,
       archived: j['archived'] as bool? ?? false,
       question: q,
+      topicId: j.containsKey('topic_id')
+          ? (j['topic_id'] as num?)?.toInt()
+          : null,
+      generalFlag: j.containsKey('general') ? j['general'] as bool? : null,
+    );
+  }
+}
+
+BotInfo? generalOf(List<BotInfo> bots) {
+  for (final b in bots) {
+    if (b.isGeneral) return b;
+  }
+  return null;
+}
+
+List<BotInfo> workersOf(List<BotInfo> bots) =>
+    bots.where((b) => !b.isGeneral).toList();
+
+/// `Message from deploy-watch:\n…` as listen writes inbox turns.
+({String? sender, String body}) inboxPayload(String input) {
+  const prefix = 'Message from ';
+  if (!input.startsWith(prefix)) return (sender: null, body: input);
+  final i = input.indexOf(':\n');
+  if (i < 0) return (sender: null, body: input);
+  final sender = input.substring(prefix.length, i).trim();
+  if (sender.isEmpty) return (sender: null, body: input);
+  return (sender: sender, body: input.substring(i + 2));
+}
+
+/// How a turn should look in chat. Owner bubbles stay right; everything else
+/// is a log line so worker reports are not painted as messages the owner sent.
+class TurnDisplay {
+  TurnDisplay({
+    required this.owner,
+    this.caption,
+    this.quote,
+    required this.output,
+    this.hide = false,
+  });
+  final bool owner;
+  final String? caption;
+  final String? quote;
+  final String output;
+  final bool hide;
+
+  factory TurnDisplay.from(TurnInfo t, {required bool inGeneral}) {
+    final src = t.source;
+    if (inGeneral && src == 'system') {
+      return TurnDisplay(owner: false, output: '', hide: true);
+    }
+    if (src == 'user') {
+      return TurnDisplay(owner: true, quote: t.input, output: t.output);
+    }
+    final parsed = inboxPayload(t.input);
+    if (src == 'bot' || parsed.sender != null) {
+      if (inGeneral) {
+        final out = t.output.trim();
+        return TurnDisplay(
+          owner: false,
+          caption: parsed.sender ?? 'session',
+          quote: out.isEmpty ? parsed.body : null,
+          output: t.output,
+        );
+      }
+      return TurnDisplay(
+        owner: false,
+        caption: parsed.sender ?? 'General',
+        quote: parsed.sender != null ? parsed.body : t.input,
+        output: t.output,
+      );
+    }
+    return TurnDisplay(
+      owner: false,
+      caption: src.isEmpty ? null : src,
+      quote: t.input,
+      output: t.output,
     );
   }
 }
